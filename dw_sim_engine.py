@@ -1,6 +1,36 @@
 import random
 import itertools
 
+class DoubleWheel:
+    """
+    🎡 THE DUAL-WHEEL PHYSICS ENGINE (Calibrated v3.0)
+    Based on IGT Rule Screen:
+    - Trigger: 1 in 5.049 (19.8059%)
+    - Range: 2x to 16x (Implies Inner Wheel min is 2)
+    - Average: 6.05x 
+    """
+    def __init__(self):
+        # OUTER WHEEL: Contains 1x, 2x, 3x, 4x
+        # Weighted to Avg ~2.30
+        self.outer_weights = [1]*20 + [2]*40 + [3]*30 + [4]*10
+        
+        # INNER WHEEL: Contains 2x, 3x, 4x (NO 1x)
+        # Weighted to Avg ~2.63
+        # Combined Avg = 2.30 * 2.63 = 6.05
+        self.inner_weights = [2]*45 + [3]*45 + [4]*10
+        
+    def spin(self):
+        # 1. Check Trigger (1 in 5.049)
+        if random.random() > (1 / 5.049):
+            # Return tuple: (Total_Mult, Outer_Val, Inner_Val)
+            return 1, 1, 1 
+            
+        # 2. Spin Both Wheels
+        val_a = random.choice(self.outer_weights)
+        val_b = random.choice(self.inner_weights)
+        
+        return (val_a * val_b), val_a, val_b
+
 class DeucesWildSim:
     def __init__(self, variant="NSUD", bankroll=40.00, denom=0.25, max_credits=5, floor=18.75, ceiling=60.00):
         self.variant = variant.upper()
@@ -11,20 +41,33 @@ class DeucesWildSim:
         self.ceiling = float(ceiling)
         self.deal_count = 0
         
+        # 🎡 TRI-CORE PAYTABLES
+        # DBW: 16/13/4/3/3
+        
+        sf_pay = 10
+        if self.variant == "AIRPORT": sf_pay = 9
+        elif self.variant == "DBW": sf_pay = 13
+        
+        five_oak_pay = 12 if self.variant == "AIRPORT" else 16
+        fh_pay = 3 if self.variant == "DBW" else 4
+        
         # Paytables (Per Credit)
         self.paytable = {
             "ROYAL": 800, 
             "FOUR_DEUCES": 200, 
-            "WILD_ROYAL": 25 if self.variant == "NSUD" else 20,
-            "FIVE_OAK": 16 if self.variant == "NSUD" else 12,
-            "STRAIGHT_FLUSH": 10 if self.variant == "NSUD" else 9,
+            "WILD_ROYAL": 25 if self.variant in ["NSUD", "DBW"] else 20,
+            "FIVE_OAK": five_oak_pay,
+            "STRAIGHT_FLUSH": sf_pay,
             "FOUR_OAK": 4, 
-            "FULL_HOUSE": 4 if self.variant == "NSUD" else 4, 
+            "FULL_HOUSE": fh_pay, 
             "FLUSH": 3, 
             "STRAIGHT": 2, 
             "THREE_OAK": 1, 
             "NOTHING": 0
         }
+        
+        # Initialize Wheel
+        self.wheel = DoubleWheel()
 
     # --- CORE MECHANICS ---
     def get_deck(self):
@@ -282,7 +325,17 @@ class DeucesWildSim:
                 suits = {c[1] for c in combo}
                 if len(suits) == 1 and vals.issubset(royals):
                      return deuces + list(combo)
-                     
+            
+            # 🔥 DBW "13 RULE" (Suited Connectors)
+            # If SF pays 13, we hold 3-card SF draws (Deuce + 2 Suited)
+            if self.variant == "DBW":
+                for combo in itertools.combinations(non_deuces, 2):
+                    if self.check_straight_flush_draw(combo):
+                        # Strict check: Must be connectors or near-connectors
+                        vals = sorted([self.get_rank_val(c) for c in combo])
+                        if vals[-1] - vals[0] <= 2: 
+                             return deuces + list(combo)
+
             return deuces
 
         # --- 0 DEUCES ---

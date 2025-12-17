@@ -33,6 +33,19 @@ PAYTABLES = {
         "STRAIGHT": 2,
         "THREE_OAK": 1,
         "NOTHING": 0
+    },
+    "DBW": {
+        "NATURAL_ROYAL": 800,
+        "FOUR_DEUCES": 200,
+        "WILD_ROYAL": 25,
+        "FIVE_OAK": 16,      # Aggressive (Like NSUD)
+        "STRAIGHT_FLUSH": 13, # The "Bribe" (Critical for Suited Connectors)
+        "FOUR_OAK": 4,
+        "FULL_HOUSE": 3,      # The "Tax"
+        "FLUSH": 3,
+        "STRAIGHT": 2,
+        "THREE_OAK": 1,
+        "NOTHING": 0
     }
 }
 
@@ -224,7 +237,7 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
 
     print("==========================================")
-    print("🧬 DEUCES WILD EXACT SOLVER (v3.1 - MULTICORE)")
+    print("🧬 DEUCES WILD EXACT SOLVER (v3.2 - TRI-CORE)")
     print("==========================================")
     
     current_variant = "NSUD"
@@ -241,9 +254,11 @@ if __name__ == "__main__":
             print("\nSelect Variant:")
             print("1. NSUD (Aggressive: 16/10)")
             print("2. AIRPORT (Defensive: 12/9)")
-            v = input("Select (1/2): ").strip()
+            print("3. DBW (Hybrid: 16/13)")
+            v = input("Select (1/2/3): ").strip()
             if v == '1': current_variant = "NSUD"
             elif v == '2': current_variant = "AIRPORT"
+            elif v == '3': current_variant = "DBW"
         
         elif choice == 'E':
             raw_hand = input("\nEnter Hand: ")
