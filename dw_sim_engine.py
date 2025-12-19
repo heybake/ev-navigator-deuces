@@ -1,34 +1,25 @@
+"""
+dw_sim_engine.py
+STRATEGY & ECONOMICS LAYER (Hybrid v3.2 - User Verified)
+"""
+
 import random
 import itertools
+from dw_core_engine import DeucesWildCore
 
 class DoubleWheel:
     """
-    🎡 THE DUAL-WHEEL PHYSICS ENGINE (Calibrated v3.0)
-    Based on IGT Rule Screen:
-    - Trigger: 1 in 5.049 (19.8059%)
-    - Range: 2x to 16x (Implies Inner Wheel min is 2)
-    - Average: 6.05x 
+    🎡 THE DUAL-WHEEL PHYSICS ENGINE
     """
     def __init__(self):
-        # OUTER WHEEL: Contains 1x, 2x, 3x, 4x
-        # Weighted to Avg ~2.30
         self.outer_weights = [1]*20 + [2]*40 + [3]*30 + [4]*10
-        
-        # INNER WHEEL: Contains 2x, 3x, 4x (NO 1x)
-        # Weighted to Avg ~2.63
-        # Combined Avg = 2.30 * 2.63 = 6.05
         self.inner_weights = [2]*45 + [3]*45 + [4]*10
         
     def spin(self):
-        # 1. Check Trigger (1 in 5.049)
         if random.random() > (1 / 5.049):
-            # Return tuple: (Total_Mult, Outer_Val, Inner_Val)
             return 1, 1, 1 
-            
-        # 2. Spin Both Wheels
         val_a = random.choice(self.outer_weights)
         val_b = random.choice(self.inner_weights)
-        
         return (val_a * val_b), val_a, val_b
 
 class DeucesWildSim:
@@ -41,190 +32,88 @@ class DeucesWildSim:
         self.ceiling = float(ceiling)
         self.deal_count = 0
         
-        # 🎡 TRI-CORE PAYTABLES
-        # DBW: 16/13/4/3/3
-        
-        sf_pay = 10
-        if self.variant == "AIRPORT": sf_pay = 9
-        elif self.variant == "DBW": sf_pay = 13
-        
-        five_oak_pay = 12 if self.variant == "AIRPORT" else 16
-        fh_pay = 3 if self.variant == "DBW" else 4
-        
-        # Paytables (Per Credit)
-        self.paytable = {
-            "ROYAL": 800, 
-            "FOUR_DEUCES": 200, 
-            "WILD_ROYAL": 25 if self.variant in ["NSUD", "DBW"] else 20,
-            "FIVE_OAK": five_oak_pay,
-            "STRAIGHT_FLUSH": sf_pay,
-            "FOUR_OAK": 4, 
-            "FULL_HOUSE": fh_pay, 
-            "FLUSH": 3, 
-            "STRAIGHT": 2, 
-            "THREE_OAK": 1, 
-            "NOTHING": 0
-        }
-        
-        # Initialize Wheel
+        self.core = DeucesWildCore()
         self.wheel = DoubleWheel()
+        self.paytable = self._get_paytable_settings()
 
-    # --- CORE MECHANICS ---
-    def get_deck(self):
-        suits = ['s', 'h', 'd', 'c']
-        ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
-        deck = [r+s for r in ranks for s in suits]
-        random.shuffle(deck)
-        return deck
-
-    def get_rank_val(self, card):
-        r = card[0].upper()
-        mapping = {'2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, 'T':10, 'J':11, 'Q':12, 'K':13, 'A':14}
-        return mapping[r]
-    
-    def normalize_input(self, hand_str):
-        # Cleans input string "2h 10s" -> ['2h', 'Ts']
-        parts = hand_str.strip().replace(',', ' ').split()
-        clean = []
-        for p in parts:
-            p = p.upper().replace('10', 'T')
-            clean.append(p[0] + p[1].lower())
-        return clean
-
-    def evaluate_hand(self, hand):
-        ranks = [c[0].upper() for c in hand]
-        # ✅ FIX: Get suits of NON-DEUCES only to check for flush
-        non_deuce_suits = [c[1].lower() for c in hand if c[0] != '2']
+    def _get_paytable_settings(self):
+        """
+        Returns the payout dictionary based on User Verified tables.
+        DBW: 16/13/4/3/2/2 (Aggressive 5OAK, High SF, Trash Flush)
+        """
+        # Defaults (NSUD)
+        five_oak = 16
+        sf_pay = 10
+        fh_pay = 4
+        flush_pay = 3
+        wild_royal = 25
         
-        deuces = ranks.count('2')
-        
-        rank_vals = [self.get_rank_val(c) for c in hand if c[0] != '2']
-        rank_vals.sort()
-        
-        # ✅ FIX: Flush logic: if no non-deuces (5 deuces impossible) or all non-deuces match suit
-        if len(non_deuce_suits) == 0:
-            is_flush = True
-        else:
-            is_flush = len(set(non_deuce_suits)) == 1
-        
-        # 1. Natural Royal
-        if is_flush and deuces == 0 and set(ranks) == {'T','J','Q','K','A'}:
-            return ("Natural Royal", self.paytable["ROYAL"])
-        
-        # 2. Four Deuces
-        if deuces == 4: return ("Four Deuces", self.paytable["FOUR_DEUCES"])
-        
-        # 3. Wild Royal
-        if is_flush:
-            needed = {10,11,12,13,14}
-            # Only checking subset against needed is safer
-            if set(rank_vals).issubset(needed) and deuces > 0:
-                 return ("Wild Royal", self.paytable["WILD_ROYAL"])
-
-        # 4. Five of a Kind
-        counts = {x:rank_vals.count(x) for x in set(rank_vals)}
-        max_k = max(counts.values()) if counts else 0
-        if deuces + max_k >= 5: return ("5 of a Kind", self.paytable["FIVE_OAK"])
-
-        # 5. Straight Flush
-        if is_flush:
-            # Case A: Natural SF or Deuces filling gaps
-            if not rank_vals: 
-                return ("Straight Flush", self.paytable["STRAIGHT_FLUSH"])
+        if self.variant == "AIRPORT":
+            five_oak = 12
+            sf_pay = 9
+            fh_pay = 4
+            flush_pay = 3
+            wild_royal = 20 # or 25 depending on config, usually 20 in 98.9%
             
-            unique_vals = sorted(list(set(rank_vals)))
-            gaps = 0
-            for i in range(len(unique_vals)-1):
-                gaps += (unique_vals[i+1] - unique_vals[i] - 1)
+        elif self.variant == "DBW":
+            five_oak = 16   # User Confirmed
+            sf_pay = 13     # User Confirmed (High!)
+            fh_pay = 3      # User Confirmed (Low)
+            flush_pay = 2   # User Confirmed (Killer)
+            wild_royal = 25 # Standard
             
-            if gaps <= deuces: 
-                return ("Straight Flush", self.paytable["STRAIGHT_FLUSH"])
-            
-            # Case B: Wheel Check (A-2-3-4-5) where A is 14
-            if 14 in unique_vals:
-                # Treat A as 1
-                wheel = [1 if x==14 else x for x in unique_vals]
-                wheel.sort()
-                gaps_w = 0
-                for i in range(len(wheel)-1):
-                    gaps_w += (wheel[i+1] - wheel[i] - 1)
-                
-                # We need to ensure the span is within 5 cards
-                span_w = wheel[-1] - wheel[0]
-                # Count distinct ranks needed to fill
-                needed = span_w - (len(wheel) - 1)
-                
-                if needed <= deuces and span_w <= 4: 
-                    return ("Straight Flush", self.paytable["STRAIGHT_FLUSH"])
+        return {
+            "NATURAL_ROYAL": 800,
+            "FOUR_DEUCES": 200,
+            "WILD_ROYAL": wild_royal,
+            "FIVE_OAK": five_oak,
+            "STRAIGHT_FLUSH": sf_pay,
+            "FOUR_OAK": 4,
+            "FULL_HOUSE": fh_pay,
+            "FLUSH": flush_pay,
+            "STRAIGHT": 2,
+            "THREE_OAK": 1,
+            "NOTHING": 0,
+            "ERROR": 0
+        }
 
-        # 6. Four of a Kind
-        if deuces + max_k >= 4: return ("4 of a Kind", self.paytable["FOUR_OAK"])
+    # --- CORE BRIDGE ---
+    def normalize_input(self, s): return self.core.normalize_input(s)
+    def get_rank_val(self, c): return {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14}[c[0].upper()]
 
-        # 7. Full House
-        if deuces == 0:
-            if 3 in counts.values() and 2 in counts.values(): return ("Full House", self.paytable["FULL_HOUSE"])
-        if deuces == 1:
-            if list(counts.values()).count(2) == 2: return ("Full House", self.paytable["FULL_HOUSE"])
-            
-        # 8. Flush
-        if is_flush: return ("Flush", self.paytable["FLUSH"])
-        
-        # 9. Straight
-        unique_vals = sorted(list(set(rank_vals)))
-        if len(unique_vals) + deuces >= 5:
-            # Standard
-            span = unique_vals[-1] - unique_vals[0]
-            if span <= 4: return ("Straight", self.paytable["STRAIGHT"])
-            # Wheel
-            if 14 in unique_vals:
-                wheel = [1 if x==14 else x for x in unique_vals]
-                wheel.sort()
-                span_w = wheel[-1] - wheel[0]
-                if span_w <= 4: return ("Straight", self.paytable["STRAIGHT"])
+    def evaluate_hand_score(self, hand):
+        rank_key = self.core.identify_hand(hand)
+        # No special Split logic needed for this version of DBW
+        return rank_key, self.paytable.get(rank_key, 0)
 
-        # 10. Three of a Kind
-        if deuces + max_k >= 3: return ("3 of a Kind", self.paytable["THREE_OAK"])
-        
-        return ("Nothing", 0)
+    def evaluate_hand(self, hand): return self.evaluate_hand_score(hand)
 
-    # --- HELPER METHODS FOR STRATEGY ---
+    # --- STRATEGY HELPERS ---
     def get_repeated_cards(self, hand, count_needed):
-        """Returns the specific cards that form a pair/trips/quads."""
         rank_map = {}
         for c in hand:
             r = c[0]
             if r not in rank_map: rank_map[r] = []
             rank_map[r].append(c)
-        
-        result = []
-        for r in rank_map:
-            if len(rank_map[r]) >= count_needed:
-                result.extend(rank_map[r])
-        return result
+        return [c for r in rank_map if len(rank_map[r]) >= count_needed for c in rank_map[r]]
 
     def check_straight_flush_draw(self, cards):
-        # Returns True if cards form a valid SF draw
         suits = [c[1] for c in cards]
         if len(set(suits)) != 1: return False
         vals = sorted([self.get_rank_val(c) for c in cards])
         if not vals: return True
-        span = vals[-1] - vals[0]
-        # Allow gaps, but span must be <= 4 (e.g. 5,9 is a draw? No, 5,6,7,9 is)
-        # Simplified: Check if they are within a 5-card window
-        return span <= 4
+        return (vals[-1] - vals[0]) <= 4
 
     def check_open_straight_draw(self, cards):
-        # 4 cards, consecutive, no Ace
         vals = sorted([self.get_rank_val(c) for c in cards])
         if len(vals) != 4: return False
-        if (vals[-1] - vals[0]) == 3:
-            if 14 in vals: return False
-            return True
+        if (vals[-1] - vals[0]) == 3: return (14 not in vals)
         return False
 
+    # ==========================================
+    # 🧠 ADAPTIVE STRATEGY (Updated for Flush=2)
+    # ==========================================
     def pro_strategy(self, hand):
-        # 🧬 STANDARD / OPTIMAL STRATEGY ENGINE
-        
         deuces = [c for c in hand if c[0] == '2']
         non_deuces = [c for c in hand if c[0] != '2']
         current_rank, _ = self.evaluate_hand(hand)
@@ -234,86 +123,66 @@ class DeucesWildSim:
 
         # --- 3 DEUCES ---
         if len(deuces) == 3:
-            if current_rank in ["Natural Royal", "Wild Royal", "5 of a Kind"]: return hand
+            if current_rank in ["NATURAL_ROYAL", "WILD_ROYAL", "FIVE_OAK"]: return hand
             return deuces
 
         # --- 2 DEUCES ---
         if len(deuces) == 2:
-            # 1. Top Hands
-            if current_rank in ["Natural Royal", "Wild Royal", "5 of a Kind", "Straight Flush"]: 
-                return hand
+            if current_rank in ["NATURAL_ROYAL", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH"]: return hand
             
-            # 2. 4 to Royal
+            # 4 to Royal
             royals = {10,11,12,13,14}
-            found_royal_draw = False
             for combo in itertools.combinations(non_deuces, 2):
                 vals = {self.get_rank_val(c) for c in combo}
                 suits = {c[1] for c in combo}
-                if len(suits) == 1 and vals.issubset(royals):
-                    found_royal_draw = True
-                    return deuces + list(combo)
+                if len(suits) == 1 and vals.issubset(royals): return deuces + list(combo)
 
-            # 3. Made Flush / Straight Decisions
-            if current_rank == "Flush":
-                if self.variant == "AIRPORT":
-                    # Airport: KEEP Made Flush (15.00 > 14.85)
-                    return hand
-                else:
-                    # ✅ FIX: NSUD: BREAK Made Flush (16.37 > 15.00)
-                    pass 
-                
-            if current_rank == "Straight":
-                pass # Break it in both variants
+            # Made Flush Logic
+            if current_rank == "FLUSH":
+                # If DBW (Flush pays 2), we BREAK IT to hunt 5OAK (pays 16) or SF (pays 13)
+                if self.variant == "DBW": pass 
+                elif self.variant == "AIRPORT": return hand
+                else: pass # NSUD breaks it too
 
-            # 4. Made 4 of a Kind
+            if current_rank == "STRAIGHT": pass 
+
+            # Made 4 of a Kind
             pair_cards = self.get_repeated_cards(non_deuces, 2)
             if pair_cards: return deuces + pair_cards
 
-            # 5. 4 to Straight Flush
+            # 4 to Straight Flush
             for combo in itertools.combinations(non_deuces, 2):
                 if self.check_straight_flush_draw(combo):
-                    # ✅ FIX: Tightened Logic for 2 Deuces
-                    # Only hold if Touching or 1-Gap (Span <= 2).
-                    # A gap of 2 or more (e.g. 4-8, Span 4) is EV negative vs holding 2 Deuces.
                     vals = sorted([self.get_rank_val(c) for c in combo])
-                    span = vals[-1] - vals[0]
-                    if span <= 2:
-                        return deuces + list(combo)
-
-            # 6. Default: Hold 2 Deuces
+                    if vals[-1] - vals[0] <= 2: return deuces + list(combo) # Strict
+            
             return deuces
 
         # --- 1 DEUCE ---
         if len(deuces) == 1:
-            if current_rank in ["Natural Royal", "Wild Royal", "5 of a Kind", "Straight Flush"]: 
-                return hand
+            if current_rank in ["NATURAL_ROYAL", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH"]: return hand
             
             # 4 to Wild Royal
             royals = {10,11,12,13,14}
             for combo in itertools.combinations(non_deuces, 3):
                 vals = {self.get_rank_val(c) for c in combo}
                 suits = {c[1] for c in combo}
-                if len(suits) == 1 and vals.issubset(royals):
-                    return deuces + list(combo)
+                if len(suits) == 1 and vals.issubset(royals): return deuces + list(combo)
             
-            if current_rank == "Full House": return hand
+            if current_rank == "FULL_HOUSE": return hand
             
             # Made Flush Logic
-            if current_rank == "Flush":
-                if self.variant == "AIRPORT":
-                    return hand
-                else:
-                    return hand # NSUD Keep Flush > 1 Deuce
+            if current_rank == "FLUSH":
+                if self.variant == "DBW": pass # Break Flush (Pays 2)
+                elif self.variant == "AIRPORT": return hand
+                else: return hand 
 
-            if current_rank == "Straight":
-                 return hand
-            
-            if current_rank == "4 of a Kind": return hand
+            if current_rank == "STRAIGHT": return hand
+            if current_rank == "FOUR_OAK": return hand
 
             # 4 to Wild SF
             for combo in itertools.combinations(non_deuces, 3):
-                if self.check_straight_flush_draw(combo):
-                    return deuces + list(combo)
+                if self.check_straight_flush_draw(combo): return deuces + list(combo)
             
             # Made 3 of a Kind
             pair_cards = self.get_repeated_cards(non_deuces, 2)
@@ -323,27 +192,22 @@ class DeucesWildSim:
             for combo in itertools.combinations(non_deuces, 2):
                 vals = {self.get_rank_val(c) for c in combo}
                 suits = {c[1] for c in combo}
-                if len(suits) == 1 and vals.issubset(royals):
-                     return deuces + list(combo)
+                if len(suits) == 1 and vals.issubset(royals): return deuces + list(combo)
             
-            # 🔥 DBW "13 RULE" (Suited Connectors)
-            # If SF pays 13, we hold 3-card SF draws (Deuce + 2 Suited)
+            # 3 to SF (Special DBW High SF Payout)
             if self.variant == "DBW":
                 for combo in itertools.combinations(non_deuces, 2):
-                    if self.check_straight_flush_draw(combo):
-                        # Strict check: Must be connectors or near-connectors
+                     if self.check_straight_flush_draw(combo):
                         vals = sorted([self.get_rank_val(c) for c in combo])
-                        if vals[-1] - vals[0] <= 2: 
-                             return deuces + list(combo)
+                        if vals[-1] - vals[0] <= 2: return deuces + list(combo)
 
             return deuces
 
         # --- 0 DEUCES ---
         if len(deuces) == 0:
-            if current_rank == "Natural Royal": return hand
-            
-            if current_rank in ["Straight Flush", "4 of a Kind", "Full House", "Flush", "Straight", "3 of a Kind"]: 
-                return hand
+            if current_rank == "NATURAL_ROYAL": return hand
+            # In DBW, Flush pays 2 (same as Straight). We hold it, but it's weak.
+            if current_rank in ["STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]: return hand
                 
             royals = {10,11,12,13,14}
             # 4 to Royal
@@ -352,7 +216,7 @@ class DeucesWildSim:
                 suits = {c[1] for c in combo}
                 if len(suits) == 1 and vals.issubset(royals): return list(combo)
 
-            # 4 to SF - Simplified
+            # 4 to SF
             for combo in itertools.combinations(non_deuces, 4):
                 if self.check_straight_flush_draw(combo): return list(combo)
             
@@ -363,6 +227,8 @@ class DeucesWildSim:
                 if len(suits) == 1 and vals.issubset(royals): return list(combo)
 
             # 4 to Flush
+            # If Flush pays 2, drawing to it is barely worth it (~0.38 EV). 
+            # But better than Discard All (~0.32). So we keep it.
             for combo in itertools.combinations(non_deuces, 4):
                 suits = {c[1] for c in combo}
                 if len(suits) == 1: return list(combo)
@@ -377,49 +243,3 @@ class DeucesWildSim:
 
             return []
         return []
-
-    def run_specific_hand(self, raw_hand_str):
-        # 1. Parse Input
-        hand = self.normalize_input(raw_hand_str)
-        if len(hand) != 5:
-            return {"Error": "Invalid Hand"}
-            
-        initial_hand_str = " ".join(hand)
-        
-        # 2. Build Stub (Remaining 47 cards)
-        full_deck = self.get_deck()
-        stub = []
-        user_cards_set = set(hand)
-        for c in full_deck:
-            if c not in user_cards_set:
-                stub.append(c)
-        
-        # 3. Strategy
-        held_cards = self.pro_strategy(hand)
-        
-        if len(held_cards) == 5: action_str = "Held All"
-        elif len(held_cards) == 0: action_str = "Redraw"
-        else: action_str = f"Held {' '.join(held_cards)}"
-        
-        # 4. Draw from Stub
-        final_hand = held_cards[:]
-        draw_count = 5 - len(final_hand)
-        drawn_cards = stub[:draw_count]
-        final_hand.extend(drawn_cards)
-        
-        # 5. Evaluate
-        rank_name, payout_mult = self.evaluate_hand(final_hand)
-        winnings = payout_mult * self.bet_amount
-        start_bank = self.bankroll
-        self.bankroll = self.bankroll - self.bet_amount + winnings
-        change = self.bankroll - start_bank
-        self.deal_count += 1
-        
-        return {
-            "Deal": self.deal_count,
-            "Start": initial_hand_str,
-            "Action": action_str,
-            "Result": rank_name,
-            "Change": change,
-            "Bankroll": self.bankroll
-        }

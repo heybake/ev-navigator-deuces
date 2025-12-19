@@ -17,7 +17,7 @@ except ImportError:
     EV_AVAILABLE = False
 
 try:
-    # 🌟 NEW: Integration with the "Mission Control" Plotter
+    # 🌟 Integration with "Mission Control" Plotter
     from dw_plot_tools import generate_mission_control_plot
     PLOT_TOOLS_AVAILABLE = True
 except ImportError:
@@ -44,8 +44,7 @@ PROTOCOL_MODE_DEFAULT = True
 class ProtocolGuardian:
     """
     🛡️ THE AIRPORT PROTOCOL ENFORCER
-    Monitors the session in real-time and triggers stops based on
-    the Research Rules (Vacuum, Tease, Zombie, Hard Deck, Sniper).
+    Monitors the session in real-time and triggers stops.
     """
     def __init__(self, start_bankroll):
         self.start = start_bankroll
@@ -96,12 +95,12 @@ class ProtocolGuardian:
 def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=False):
     """
     Runs a single hand across N lines.
-    Includes Wheel Logic for DBW.
-    Returns: (net_result, log_data_dict)
+    UPDATED: Uses Certified Class III Core for dealing/drawing.
     """
+    # Instantiate the new Engine Wrapper
     sim = DeucesWildSim(variant=variant, denom=denom)
     
-    # 1. Parse Hand
+    # 1. Parse Hand (Delegated to Core)
     hand = sim.normalize_input(hand_str)
     if len(hand) != 5:
         print(f"❌ Error: Invalid Hand ({hand_str})")
@@ -138,7 +137,8 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     wheel_str = ""
     
     if wheel_active:
-        if hasattr(sim, 'wheel'):
+        # Use the DoubleWheel class inside sim if available
+        if hasattr(sim, 'wheel') and sim.wheel:
             wheel_mult, w1, w2 = sim.wheel.spin()
         else:
             wheel_mult = 1
@@ -146,34 +146,41 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
         if wheel_mult > 1:
             wheel_str = f" ({w1}x{w2}={wheel_mult}x) 🔥"
 
-    # 3. Build Stub
-    full_deck = sim.get_deck()
-    dealt_set = set(hand)
-    stub_template = [c for c in full_deck if c not in dealt_set]
+    # 3. PHYSICS & DRAW (The Update)
+    # We need the Stub from the original deal to be physically accurate.
+    # Limitation: The user passed in 'hand_str'. We assume this is the deal.
+    # To get the correct stub for a specific hand string is complex without knowing the seed.
+    # APPROXIMATION: We create a fresh deck, remove the dealt cards, and use that as stub.
+    # This is standard for "Enter Hand" mode.
     
-    if len(stub_template) != 47:
-        print("❌ Error: Deck integrity failed.")
+    full_deck = sim.core.get_fresh_deck()
+    dealt_set = set(hand)
+    
+    # Validation: Ensure input cards are valid deck cards
+    if not dealt_set.issubset(set(full_deck)):
+        print("❌ Error: Hand contains invalid cards.")
         return 0.0, {}
 
-    # 4. Loop & Payout Logic
+    stub = [c for c in full_deck if c not in dealt_set]
+    
+    # 4. EXECUTE DRAW (Certified Core)
+    # This replaces the manual shuffle loop.
+    final_hands = sim.core.draw_from_stub(held_cards, stub, num_lines=num_lines)
+    
+    # 5. SCORING
     results = []
     total_winnings = 0.0
     
-    # Cost Logic (The Tax)
+    # Cost Logic
     base_bet_per_line = sim.bet_amount
     actual_cost_per_line = base_bet_per_line * 2 if wheel_active else base_bet_per_line
     total_bet = actual_cost_per_line * num_lines
     
-    draw_count = 5 - len(held_cards)
     lines_won = 0 
     
-    for i in range(num_lines):
-        current_stub = copy.copy(stub_template)
-        random.shuffle(current_stub)
-        drawn = current_stub[:draw_count]
-        final_hand = held_cards + drawn
-        
-        rank_name, base_payout_mult = sim.evaluate_hand(final_hand)
+    for final_hand in final_hands:
+        # Use new scoring method
+        rank_name, base_payout_mult = sim.evaluate_hand_score(final_hand)
         
         if base_payout_mult > 0:
             lines_won += 1
@@ -183,24 +190,27 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
         
         results.append(rank_name)
 
-    # 5. Result
+    # 6. Result
     net_result = total_winnings - total_bet
     
     # Concise Hits Report
     counts = Counter(results)
     top_hits = []
-    interests = ["Natural Royal", "Four Deuces", "Wild Royal", "5 of a Kind", "Straight Flush", "4 of a Kind", "Full House", "Flush"]
+    interests = ["NATURAL_ROYAL", "FOUR_DEUCES", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH"]
+    # Map back to readable names if needed, or use Core names directly.
+    # Core names are CAPS.
     
     hit_summary_list = []
     for hit_type in interests:
         if counts[hit_type] > 0:
-            top_hits.append(f"{hit_type}({counts[hit_type]})")
-            hit_summary_list.append(hit_type)
+            readable = hit_type.replace('_', ' ').title()
+            top_hits.append(f"{readable}({counts[hit_type]})")
+            hit_summary_list.append(readable)
     
     hit_str = ", ".join(top_hits) if top_hits else "No Jackpots"
     primary_hit = hit_summary_list[0] if hit_summary_list else "None"
     
-    # 6. Build Log Data Dictionary
+    # 7. Build Log Data Dictionary
     log_data = {
         "Variant": variant,
         "Wheel_Mode": str(wheel_active),
@@ -222,15 +232,13 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     return net_result, log_data
 
 def generate_random_hand_str(sim_engine):
-    """Generates a random 5-card hand string."""
-    deck = sim_engine.get_deck()
-    hand = deck[:5]
+    """Generates a random 5-card hand string using the Core."""
+    hand, _ = sim_engine.core.deal_hand()
     return " ".join(hand)
 
 def setup_logger(variant, amy_active, protocol_active, session_idx=None):
     """
     Initializes CSV logging with Batch support and Telemetry.
-    Returns: file_handle, csv_writer, filename
     """
     if not os.path.exists("logs"):
         os.makedirs("logs")
@@ -263,7 +271,7 @@ def setup_logger(variant, amy_active, protocol_active, session_idx=None):
 
 if __name__ == "__main__":
     print("==========================================")
-    print("🧬 MULTI-HAND SIMULATOR (v5.3 - TRI-CORE + MISSION CONTROL)")
+    print("🧬 MULTI-HAND SIMULATOR (v6.0 - CERTIFIED CLASS III)")
     print("==========================================")
     
     # Session State
@@ -284,6 +292,7 @@ if __name__ == "__main__":
     current_bankroll = start_bank
     denom = denom_default
     
+    # Used for generating random hands in the loop
     dealer_sim = DeucesWildSim()
     
     while True:
