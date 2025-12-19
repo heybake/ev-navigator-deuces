@@ -4,13 +4,12 @@
 This is a **Variance Lab** and **Strategy Engine** for Deuces Wild Video Poker. It features a "Hybrid" architecture that automatically pivots strategy between three distinct casino variants based on the pay table structure.
 
 ## 🏗️ Architecture
-* `dw_pay_constants.py`: **The Registry.** (New v3.2). The immutable "Single Source of Truth" for all pay table data. Separation of concerns (Data vs. Logic).
-* `dw_sim_engine.py`: **The Strategic Brain.** (v3.2 User Verified). Handles hand evaluation, logic pivoting, and specific math for "Feature" games (e.g., Wheel costs, Split Pay Tables). Imports strictly from the Registry.
+* `dw_sim_engine.py`: **The Strategic Brain.** (v3.2 User Verified). Handles hand evaluation, logic pivoting, and specific math for "Feature" games (e.g., Wheel costs, Split Pay Tables).
 * `dw_multihand_sim.py`: **The Session Controller.** Runs batch simulations (e.g., 100 sessions) and enforces "Protocol Guardian" safeguards.
 * `navigator_dealer.py`: **The Dealer.** A cryptographically secure RNG that generates hands for the simulation and training modes.
-* `dw_exact_solver.py`: **The Math Core.** Calculates the exact Combinatorial EV (Expected Value) for any given hand using parallel processing. Imports strictly from the Registry.
+* `dw_exact_solver.py`: **The Math Core.** Calculates the exact Combinatorial EV (Expected Value) for any given hand using parallel processing.
 * `dw_plot_tools.py`: **The Visualizer.** Generates variance scatter plots and performance graphs for post-session analysis.
-* `test_deuces_suite.py`: **The Auditor.** A unit test suite verifying logic against known edge cases (e.g., The Flush Trap) and Registry integrity.
+* `test_deuces_suite.py`: **The Auditor.** A unit test suite verifying logic against known edge cases (e.g., The Flush Trap).
 
 ## 🎰 Supported Variants (Auto-Pivoting)
 
