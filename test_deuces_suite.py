@@ -1,9 +1,17 @@
 import unittest
 import pandas as pd
+import sys
+import os
+
+# Ensure we can import local modules
+sys.path.append(os.getcwd())
+
 from dw_sim_engine import DeucesWildSim
-# Assuming these modules exist in your folder structure as per previous context
+# Assuming these modules exist in your folder structure
 from dw_multihand_sim import ProtocolGuardian, run_multihand_session
 from dw_exact_solver import calculate_exact_ev, evaluate_hand as solver_evaluate, PAYTABLES
+# NEW: Import the Registry for Verification
+from dw_pay_constants import PAYTABLES as MASTER_REGISTRY
 
 try:
     from dw_plot_tools import classify_session
@@ -236,6 +244,31 @@ class TestMissionControl(unittest.TestCase):
         df = pd.DataFrame(data)
         label, color = classify_session(df, start_bank=100, floor=70, ceiling=120)
         self.assertIn("TEASE", label)
+
+# ==========================================
+# 🧱 NEW ARCHITECTURE TESTS (v3.2)
+# ==========================================
+class TestPayTableQuarantine(unittest.TestCase):
+    """
+    Verifies the Architectural Decision: The Pay Table Quarantine.
+    Ensures Data is decoupled from Logic.
+    """
+    def test_single_source_of_truth(self):
+        # Verify Engine uses Registry
+        sim = DeucesWildSim(variant="NSUD")
+        # Compare sim.paytable with the MASTER_REGISTRY
+        self.assertEqual(sim.paytable, MASTER_REGISTRY["NSUD"])
+
+    def test_dbw_values_in_registry(self):
+        # Verify the specific feature values for DBW directly from source
+        self.assertEqual(MASTER_REGISTRY["DBW"]["FLUSH"], 2, "DBW Flush must be 2")
+        self.assertEqual(MASTER_REGISTRY["DBW"]["STRAIGHT_FLUSH"], 13, "DBW SF must be 13")
+
+    def test_solver_integration(self):
+        # Verify Solver sees the same data object as the Registry
+        # Since PAYTABLES was imported from dw_exact_solver at top level,
+        # checking identity against MASTER_REGISTRY confirms the link.
+        self.assertIs(PAYTABLES, MASTER_REGISTRY, "Solver and Registry must share the same data object")
 
 
 if __name__ == '__main__':

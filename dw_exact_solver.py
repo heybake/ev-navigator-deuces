@@ -1,53 +1,14 @@
 import itertools
 import sys
 import multiprocessing
+from dw_pay_constants import PAYTABLES  # <--- NEW IMPORT: Single Source of Truth
 
 # ==========================================
 # 🧬 CONFIGURATION: PAY TABLES (Per Credit)
 # ==========================================
 # Multiplied by 5 later for Max Bet display
-
-PAYTABLES = {
-    "NSUD": {
-        "NATURAL_ROYAL": 800,
-        "FOUR_DEUCES": 200,
-        "WILD_ROYAL": 25,
-        "FIVE_OAK": 16,      # Aggressive
-        "STRAIGHT_FLUSH": 10,
-        "FOUR_OAK": 4,
-        "FULL_HOUSE": 4,
-        "FLUSH": 3,
-        "STRAIGHT": 2,
-        "THREE_OAK": 1,
-        "NOTHING": 0
-    },
-    "AIRPORT": {
-        "NATURAL_ROYAL": 800,
-        "FOUR_DEUCES": 200,
-        "WILD_ROYAL": 20,
-        "FIVE_OAK": 12,      # Defensive
-        "STRAIGHT_FLUSH": 9,
-        "FOUR_OAK": 4,
-        "FULL_HOUSE": 4,
-        "FLUSH": 3,
-        "STRAIGHT": 2,
-        "THREE_OAK": 1,
-        "NOTHING": 0
-    },
-    "DBW": {
-        "NATURAL_ROYAL": 800,
-        "FOUR_DEUCES": 200,
-        "WILD_ROYAL": 25,
-        "FIVE_OAK": 16,      # Aggressive (Like NSUD)
-        "STRAIGHT_FLUSH": 13, # The "Bribe" (Critical for Suited Connectors)
-        "FOUR_OAK": 4,
-        "FULL_HOUSE": 3,      # The "Tax"
-        "FLUSH": 3,
-        "STRAIGHT": 2,
-        "THREE_OAK": 1,
-        "NOTHING": 0
-    }
-}
+# [REMOVED: Hard-coded PAYTABLES dictionary]
+# Source: dw_pay_constants.py (ADR: The Pay Table Quarantine)
 
 # ==========================================
 # 🛠️ CORE UTILITIES

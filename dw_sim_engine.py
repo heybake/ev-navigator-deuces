@@ -6,6 +6,7 @@ STRATEGY & ECONOMICS LAYER (Hybrid v3.2 - User Verified)
 import random
 import itertools
 from dw_core_engine import DeucesWildCore
+from dw_pay_constants import PAYTABLES
 
 class DoubleWheel:
     """
@@ -39,43 +40,17 @@ class DeucesWildSim:
     def _get_paytable_settings(self):
         """
         Returns the payout dictionary based on User Verified tables.
-        DBW: 16/13/4/3/2/2 (Aggressive 5OAK, High SF, Trash Flush)
+        Refactored: Imports immutable data from dw_pay_constants.
+        Source: ADR 'The Pay Table Quarantine'
         """
-        # Defaults (NSUD)
-        five_oak = 16
-        sf_pay = 10
-        fh_pay = 4
-        flush_pay = 3
-        wild_royal = 25
-        
-        if self.variant == "AIRPORT":
-            five_oak = 12
-            sf_pay = 9
-            fh_pay = 4
-            flush_pay = 3
-            wild_royal = 20 # or 25 depending on config, usually 20 in 98.9%
-            
-        elif self.variant == "DBW":
-            five_oak = 16   # User Confirmed
-            sf_pay = 13     # User Confirmed (High!)
-            fh_pay = 3      # User Confirmed (Low)
-            flush_pay = 2   # User Confirmed (Killer)
-            wild_royal = 25 # Standard
-            
-        return {
-            "NATURAL_ROYAL": 800,
-            "FOUR_DEUCES": 200,
-            "WILD_ROYAL": wild_royal,
-            "FIVE_OAK": five_oak,
-            "STRAIGHT_FLUSH": sf_pay,
-            "FOUR_OAK": 4,
-            "FULL_HOUSE": fh_pay,
-            "FLUSH": flush_pay,
-            "STRAIGHT": 2,
-            "THREE_OAK": 1,
-            "NOTHING": 0,
-            "ERROR": 0
-        }
+        # Direct Lookup from Registry
+        if self.variant in PAYTABLES:
+            return PAYTABLES[self.variant]
+
+        # Fallback for safety (though normally shouldn't happen if inputs are validated)
+        # Defaulting to NSUD as a safe baseline
+        print(f"⚠️ Warning: Unknown variant '{self.variant}'. Defaulting to NSUD.")
+        return PAYTABLES["NSUD"]
 
     # --- CORE BRIDGE ---
     def normalize_input(self, s): return self.core.normalize_input(s)
