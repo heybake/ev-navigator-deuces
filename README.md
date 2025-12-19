@@ -1,37 +1,26 @@
-﻿﻿# EV Navigator: Deuces Wild (Dual-Core Engine)
+﻿﻿# EV Navigator: Deuces Wild (Hybrid v3.2)
 
-##  Overview
-This is a **Variance Lab** and **Strategy Engine** for Deuces Wild Video Poker. It features a "Dual-Core" architecture that automatically pivots strategy between the two most common casino variants:
-* **NSUD (Not So Ugly Ducks):** Aggressive Strategy (5OAK pays 16).
-* **Airport / Illinois:** Defensive Strategy (5OAK pays 12).
+## 🔭 Overview
+This is a **Variance Lab** and **Strategy Engine** for Deuces Wild Video Poker. It features a "Hybrid" architecture that automatically pivots strategy between three distinct casino variants based on the pay table structure.
 
-##  Architecture
-* **\dw_sim_engine.py\**: The strategic brain. Handles hand evaluation, logic pivoting, and edge cases (e.g., Wheel Straights).
-* **\dw_multihand_sim.py\**: The session controller. Runs batch simulations and enforces the "Protocol Guardian" safeguards.
-* **\dw_exact_solver.py\**: The mathematical core. Calculates the exact Combinatorial EV (Expected Value) for any given hand.
-* **\dw_plot_tools.py\**: The visualization engine. Generates variance scatter plots and performance graphs.
-* **\	est_deuces_suite.py\**: A complete unit test suite verifying the math and strategy logic.
+## 🏗️ Architecture
+* `dw_sim_engine.py`: **The Strategic Brain.** (v3.2 User Verified). Handles hand evaluation, logic pivoting, and specific math for "Feature" games (e.g., Wheel costs, Split Pay Tables).
+* `dw_multihand_sim.py`: **The Session Controller.** Runs batch simulations (e.g., 100 sessions) and enforces "Protocol Guardian" safeguards.
+* `navigator_dealer.py`: **The Dealer.** A cryptographically secure RNG that generates hands for the simulation and training modes.
+* `dw_exact_solver.py`: **The Math Core.** Calculates the exact Combinatorial EV (Expected Value) for any given hand using parallel processing.
+* `dw_plot_tools.py`: **The Visualizer.** Generates variance scatter plots and performance graphs for post-session analysis.
+* `test_deuces_suite.py`: **The Auditor.** A unit test suite verifying logic against known edge cases (e.g., The Flush Trap).
 
-##  Usage
+## 🎰 Supported Variants (Auto-Pivoting)
+
+| Variant | 5 of a Kind | Straight Flush | Flush | Strategy Profile |
+| :--- | :---: | :---: | :---: | :--- |
+| **NSUD** | 16 | 10 | 3 | **Aggressive:** Break made hands to hunt for Quads. |
+| **AIRPORT** | 12 | 9 | 3 | **Defensive:** Hold made Flushes to survive the grind. |
+| **DBW** | 16 | 13 | 2 | **Hyper-Aggressive:** Treat Flushes as "Trash" (Pay 2) and hunt the 13x SF. |
+
+## 🚀 Usage
 
 ### 1. Run the Simulator
-\\\ash
+```bash
 python dw_multihand_sim.py
-\\\
-*Follow the on-screen prompts to run a single hand or a batch simulation (e.g., 50 sessions).*
-
-### 2. Run the Integrity Check
-\\\ash
-python test_deuces_suite.py
-\\\
-*Verifies the logic against known edge cases (e.g., the "Flush Trap").*
-
-##  The Protocol Guardian
-The simulator includes a \ProtocolGuardian\ class that mimics professional bankroll management:
-* **Vacuum Stop:** Aborts if bankroll drops 25% in the first 15 hands.
-* **Sniper Win:** Locks in profit at +20% gain.
-* **Hard Deck:** Forces a stop at Hand 66 to prevent statistical drift.
-
-##  Outputs
-* **logs/**: CSV files detailing every hand, action, and EV decision.
-* **plots/**: PNG scatter plots visualizing the bankroll variance and "Amy Bot" betting levels.
