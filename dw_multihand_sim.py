@@ -6,6 +6,8 @@ import csv
 import datetime
 from collections import Counter, deque
 from dw_sim_engine import DeucesWildSim
+# NEW: Import Registry for Dynamic Menu
+from dw_pay_constants import PAYTABLES 
 
 # ---------------------------------------------------------
 # 📊 OPTIONAL MODULES (EV Solver & Plot Tools)
@@ -28,7 +30,7 @@ except ImportError:
 # 🧬 CONFIGURATION & DEFAULTS
 # ==========================================
 DEFAULT_LINES = 5
-DEFAULT_VARIANT = "DBW" 
+DEFAULT_VARIANT = "NSUD" 
 DEFAULT_START_BANKROLL = 40.00
 DEFAULT_FLOOR = 70.00   # 🛡️ THE DOOM SLOPE HARD DECK
 DEFAULT_CEILING = 120.00
@@ -147,12 +149,6 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
             wheel_str = f" ({w1}x{w2}={wheel_mult}x) 🔥"
 
     # 3. PHYSICS & DRAW (The Update)
-    # We need the Stub from the original deal to be physically accurate.
-    # Limitation: The user passed in 'hand_str'. We assume this is the deal.
-    # To get the correct stub for a specific hand string is complex without knowing the seed.
-    # APPROXIMATION: We create a fresh deck, remove the dealt cards, and use that as stub.
-    # This is standard for "Enter Hand" mode.
-    
     full_deck = sim.core.get_fresh_deck()
     dealt_set = set(hand)
     
@@ -164,7 +160,6 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     stub = [c for c in full_deck if c not in dealt_set]
     
     # 4. EXECUTE DRAW (Certified Core)
-    # This replaces the manual shuffle loop.
     final_hands = sim.core.draw_from_stub(held_cards, stub, num_lines=num_lines)
     
     # 5. SCORING
@@ -198,7 +193,6 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     top_hits = []
     interests = ["NATURAL_ROYAL", "FOUR_DEUCES", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH"]
     # Map back to readable names if needed, or use Core names directly.
-    # Core names are CAPS.
     
     hit_summary_list = []
     for hit_type in interests:
@@ -271,7 +265,7 @@ def setup_logger(variant, amy_active, protocol_active, session_idx=None):
 
 if __name__ == "__main__":
     print("==========================================")
-    print("🧬 MULTI-HAND SIMULATOR (v6.0 - CERTIFIED CLASS III)")
+    print("🧬 MULTI-HAND SIMULATOR (v6.1 - DYNAMIC)")
     print("==========================================")
     
     # Session State
@@ -327,7 +321,7 @@ if __name__ == "__main__":
             print("\n--- SETTINGS ---")
             print("1. Set Lines")
             print(f"2. Set Base Denom (Curr: ${denom_default:.2f})")
-            print("3. Switch Variant (1=NSUD, 2=Airport, 3=DBW)")
+            print("3. Switch Variant") # <--- DYNAMIC MENU OPTION
             print(f"4. Set Bankroll (Curr: ${start_bank:.2f})")
             print(f"5. Set Floor (Curr: ${floor:.2f})")
             print(f"6. Set Ceiling (Curr: ${ceiling:.2f})")
@@ -344,11 +338,18 @@ if __name__ == "__main__":
                     denom_default = float(input(f"Denom (Curr: ${denom_default:.2f}): $"))
                 except: pass
             elif sub == '3':
-                print("1. NSUD (16/10)\n2. AIRPORT (12/9)\n3. DBW (16/13 - Hybrid)")
-                v = input("Variant: ")
-                if v == '1': variant = "NSUD"
-                elif v == '2': variant = "AIRPORT"
-                elif v == '3': variant = "DBW"
+                # 🌟 DYNAMIC MENU: Reads from PAYTABLES 🌟
+                available = list(PAYTABLES.keys())
+                print("\nAvailable Variants:")
+                for i, k in enumerate(available, 1):
+                    print(f"{i}. {k}")
+                try:
+                    v_idx = int(input("Select Number: ")) - 1
+                    if 0 <= v_idx < len(available):
+                        variant = available[v_idx]
+                        print(f"✅ Switched to {variant}")
+                except: print("❌ Invalid Selection")
+
             elif sub == '4':
                 try: start_bank = float(input(f"Start Bank (Curr: ${start_bank:.2f}): $"))
                 except: pass

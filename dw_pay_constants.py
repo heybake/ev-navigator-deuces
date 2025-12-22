@@ -49,5 +49,19 @@ PAYTABLES = {
         "THREE_OAK": 1,
         "NOTHING": 0,
         "ERROR": 0
+    },
+    "LOOSE_DEUCES": {
+        "NATURAL_ROYAL": 800,
+        "FOUR_DEUCES": 500,  # 500 * 5 coins = 2500 Jackpot!
+        "WILD_ROYAL": 25,
+        "FIVE_OAK": 15,      # Note: Lower than NSUD (16)
+        "STRAIGHT_FLUSH": 10,
+        "FOUR_OAK": 4,
+        "FULL_HOUSE": 4,
+        "FLUSH": 3,
+        "STRAIGHT": 2,
+        "THREE_OAK": 1,
+        "NOTHING": 0,
+        "ERROR": 0
     }
 }
