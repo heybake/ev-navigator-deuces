@@ -1,13 +1,15 @@
 import sys
 import random
-import copy
 import os
-import csv
 import datetime
-from collections import Counter, deque
+from collections import Counter
 from dw_sim_engine import DeucesWildSim
 from dw_pay_constants import PAYTABLES 
+
+# --- MODULE IMPORTS (The Micro-Services) ---
 from dw_logger import SessionLogger
+from dw_protocol_guardian import ProtocolGuardian
+from dw_bot_amy import AmyBot
 
 # ---------------------------------------------------------
 # 📊 OPTIONAL MODULES
@@ -39,35 +41,8 @@ AMY_MODE_DEFAULT = False
 AMY_LADDER_DEFAULT = [0.05, 0.10, 0.25] 
 PROTOCOL_MODE_DEFAULT = True 
 
-class ProtocolGuardian:
-    def __init__(self, start_bankroll):
-        self.start = start_bankroll
-        self.spike_hand_idx = -1
-        self.triggered = False
-        self.trigger_reason = None
-        
-    def check(self, hands_played, current_bankroll):
-        if self.triggered: return self.trigger_reason
-        if current_bankroll >= (self.start * 1.20):
-            self.triggered = True; self.trigger_reason = "SNIPER_WIN"; return "SNIPER_WIN"
-        if hands_played <= 15 and current_bankroll <= (self.start * 0.75):
-            self.triggered = True; self.trigger_reason = "VACUUM_STOP"; return "VACUUM_STOP"
-        if current_bankroll > self.start:
-            self.spike_hand_idx = hands_played
-        if self.spike_hand_idx != -1: 
-            if current_bankroll < self.start:
-                if (hands_played - self.spike_hand_idx) <= 5:
-                    self.triggered = True; self.trigger_reason = "TEASE_EXIT"; return "TEASE_EXIT"
-        if hands_played == 40 and current_bankroll < self.start:
-            self.triggered = True; self.trigger_reason = "ZOMBIE_LIMIT"; return "ZOMBIE_LIMIT"
-        if hands_played >= 66:
-            self.triggered = True; self.trigger_reason = "HARD_DECK"; return "HARD_DECK"
-        return None
-
 def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=False):
-    """
-    Runs a simulation session (used for Batch Mode).
-    """
+    """Runs a simulation session (used for Batch Mode)."""
     sim = DeucesWildSim(variant=variant, denom=denom)
     hand = sim.normalize_input(hand_str)
     if len(hand) != 5: return 0.0, {}
@@ -129,18 +104,11 @@ def generate_random_hand_str(sim_engine):
     hand, _ = sim_engine.core.deal_hand()
     return " ".join(hand)
 
-# ==========================================
-# 🧠 THE EV COACH (INTERACTIVE MODE)
-# ==========================================
 def run_interactive_coach(variant, denom, wheel_active):
-    """
-    The new [E]nter Hand Mode.
-    Asks user for a hold, compares it to the Solver, and shows the cost of errors.
-    """
+    """The [E]nter Hand Mode with EV Coaching."""
     sim = DeucesWildSim(variant=variant)
     print(f"\n🎓 EV COACH ACTIVATED ({variant})")
     
-    # 1. Get Hand
     raw = input("Enter Hand (e.g. '2h 2s 5c...'): ")
     hand = sim.normalize_input(raw)
     if len(hand) != 5:
@@ -148,76 +116,47 @@ def run_interactive_coach(variant, denom, wheel_active):
         return
 
     print(f"\n🃏 Hand: {'  '.join(hand)}")
-    
-    # 2. Ask User for Hold
     user_input = input("Which cards do you hold? (e.g. '2h 2s' or 'all' or 'none'): ")
     user_hold = []
     
-    if user_input.lower() in ['none', '', 'discard all']:
-        user_hold = []
-    elif user_input.lower() in ['all', 'hold all', 'keep']:
-        user_hold = hand[:]
+    if user_input.lower() in ['none', '', 'discard all']: user_hold = []
+    elif user_input.lower() in ['all', 'hold all', 'keep']: user_hold = hand[:]
     else:
-        # Parse user input flexibly
         user_parts = sim.normalize_input(user_input)
-        # Validate they are in the hand
         for c in user_parts:
             if c in hand: user_hold.append(c)
-            else: print(f"⚠️ Warning: {c} is not in the hand (ignoring).")
-    
-    # 3. Calculate User EV
-    user_ev = 0.0
-    max_ev = 0.0
-    best_hold = []
     
     if EV_AVAILABLE:
         print("🤔 Analyzing probabilities...")
         pt = dw_exact_solver.PAYTABLES[variant]
-        
-        # User EV
         user_indices = [i for i, c in enumerate(hand) if c in user_hold]
         user_ev = dw_exact_solver.calculate_exact_ev(hand, user_indices, pt)
-        
-        # Solver EV (Max)
         best_hold, max_ev = dw_exact_solver.solve_hand_silent(hand, pt)
-    else:
-        print("❌ Error: Solver module not found.")
-        return
-
-    # 4. The Verdict
-    print("-" * 40)
-    
-    # Format Holds for Display
-    u_str = " ".join(user_hold) if user_hold else "Discard All"
-    b_str = " ".join(best_hold) if best_hold else "Discard All"
-    
-    diff = max_ev - user_ev
-    is_perfect = diff < 0.001
-    
-    if is_perfect:
-        print(f"✅ PERFECT PLAY!")
-        print(f"   You Held: {u_str}")
-        print(f"   EV:       {user_ev:.4f}")
-    else:
-        print(f"❌ MISTAKE DETECTED")
-        print(f"   You Held:  {u_str:<15} (EV: {user_ev:.4f})")
-        print(f"   Optimal:   {b_str:<15} (EV: {max_ev:.4f})")
-        print(f"   COST:      -${diff:.4f} per coin")
         
-        # Calculate real money cost
-        cost_money = diff * denom
-        if wheel_active: cost_money *= 2 # Wheel doubles bet, so errors cost double? (Debatable, but EV is per unit)
-        print(f"   Real Cost: -${cost_money:.2f} (at current denom)")
-
-    print("-" * 40)
-    input("Press Enter to continue...")
+        diff = max_ev - user_ev
+        u_str = " ".join(user_hold) if user_hold else "Discard All"
+        b_str = " ".join(best_hold) if best_hold else "Discard All"
+        
+        print("-" * 40)
+        if diff < 0.001:
+            print(f"✅ PERFECT PLAY! (EV: {user_ev:.4f})")
+        else:
+            print(f"❌ MISTAKE DETECTED")
+            print(f"   You Held:  {u_str:<15} (EV: {user_ev:.4f})")
+            print(f"   Optimal:   {b_str:<15} (EV: {max_ev:.4f})")
+            cost_money = diff * denom * (2 if wheel_active else 1)
+            print(f"   Real Cost: -${cost_money:.2f} (per hand)")
+        print("-" * 40)
+        input("Press Enter to continue...")
+    else:
+        print("❌ Solver not available.")
 
 # ==========================================
 # 🎮 INTERACTIVE MAIN LOOP
 # ==========================================
 if __name__ == "__main__":
     print("==========================================")
-    print("🧬 MULTI-HAND SIMULATOR (v6.4 - AMY RESTORED)")
+    print("🧬 MULTI-HAND SIMULATOR (v7.1 - MICROSERVICE)")
     print("==========================================")
     
     variant = DEFAULT_VARIANT
@@ -250,10 +189,8 @@ if __name__ == "__main__":
         elif choice == 'A': amy_mode = not amy_mode
         elif choice == 'P': protocol_mode = not protocol_mode
         elif choice == 'W': wheel_active = not wheel_active
+        elif choice == 'E': run_interactive_coach(variant, denom_default, wheel_active)
         
-        elif choice == 'E':
-            run_interactive_coach(variant, denom_default, wheel_active)
-                
         elif choice == 'S':
             print("\n--- SETTINGS ---")
             print("1. Set Lines")
@@ -262,13 +199,17 @@ if __name__ == "__main__":
             print(f"4. Set Bankroll (Curr: ${start_bank:.2f})")
             print(f"5. Set Floor (Curr: ${floor:.2f})")
             print(f"6. Set Ceiling (Curr: ${ceiling:.2f})")
+            print(f"7. Toggle Logging (Current: {log_s})")
+            print(f"8. Set Amy Ladder (Curr: {amy_ladder})")
             
             sub = input("Select: ").strip()
-            if sub == '1': 
-                try: lines = int(input("Lines: "))
+            
+            if sub == '1':
+                try: lines = int(input(f"Lines (Curr: {lines}): "))
                 except: pass
             elif sub == '2':
-                try: denom_default = float(input("Denom: "))
+                try: 
+                    denom_default = float(input(f"Denom (Curr: ${denom_default:.2f}): $"))
                 except: pass
             elif sub == '3':
                 available = list(PAYTABLES.keys())
@@ -281,15 +222,30 @@ if __name__ == "__main__":
                         variant = available[v_idx]
                         print(f"✅ Switched to {variant}")
                 except: print("❌ Invalid Selection")
+
             elif sub == '4':
-                try: start_bank = float(input("Start Bank: "))
+                try: start_bank = float(input(f"Start Bank (Curr: ${start_bank:.2f}): $"))
                 except: pass
             elif sub == '5':
-                try: floor = float(input("Floor: "))
+                try: floor = float(input(f"Floor (Curr: ${floor:.2f}): $"))
                 except: pass
             elif sub == '6':
-                try: ceiling = float(input("Ceiling: "))
+                try: ceiling = float(input(f"Ceiling (Curr: ${ceiling:.2f}): $"))
                 except: pass
+            elif sub == '7':
+                logging_on = not logging_on
+            elif sub == '8':
+                try:
+                    val = input("Enter 3 denoms (e.g. 0.05, 0.10, 0.25): ")
+                    parts = [float(x.strip()) for x in val.split(',')]
+                    if len(parts) == 3:
+                        amy_ladder = parts
+                        denom_default = amy_ladder[0] 
+                        print(f"✅ Amy Ladder set to: {amy_ladder}")
+                    else:
+                        print("❌ Error: Must provide exactly 3 values.")
+                except:
+                    print("❌ Error: Invalid format.")
 
         elif choice == 'R':
             try: batch_count = int(input("Sessions [1]: ") or 1)
@@ -299,90 +255,45 @@ if __name__ == "__main__":
             for session_idx in range(1, batch_count + 1):
                 current_bankroll = start_bank
                 denom = denom_default
-                win_history = deque(maxlen=10)
                 hands_played = 0
-                guardian = ProtocolGuardian(start_bank) if protocol_mode else None
                 
-                logger = None
-                if logging_on:
-                    logger = SessionLogger(variant, amy_mode, protocol_mode, session_idx)
+                # --- INSTANTIATE AGENTS ---
+                guardian = ProtocolGuardian(start_bank) if protocol_mode else None
+                amy_bot = AmyBot(amy_ladder, lines) if amy_mode else None
+                logger = SessionLogger(variant, amy_mode, protocol_mode, session_idx) if logging_on else None
                 
                 try:
                     stop_reason = "Running"
                     while current_bankroll > floor and current_bankroll < ceiling:
                         
-                        # ==========================================
-                        # 🤖 AMY BOT LOGIC (RESTORED)
-                        # ==========================================
+                        # 1. AMY DECISION
                         amy_note = ""
-                        if amy_mode and len(amy_ladder) >= 3:
-                            # 1. Determine Current Level
-                            try: level_idx = amy_ladder.index(denom)
-                            except: level_idx = 0; denom = amy_ladder[0]
-                            
-                            # 2. Set Window Size
-                            window_size = 10 if level_idx == 0 else (5 if level_idx == 1 else 3)
-                            
-                            # 3. Check Stats
-                            if len(win_history) >= window_size:
-                                recent_wins = list(win_history)[-window_size:]
-                                win_sum = sum(recent_wins)
-                                ratio = win_sum / (lines * window_size)
-                                
-                                liquidity = current_bankroll - floor
-                                cost_at_10 = amy_ladder[1] * 5 * lines
-                                cost_at_25 = amy_ladder[2] * 5 * lines
-                                
-                                # LEVEL 1 -> 2 (Climb)
-                                if level_idx == 0:
-                                    if ratio >= 0.5 and liquidity >= (cost_at_10 * 10):
-                                        denom = amy_ladder[1]
-                                        amy_note = "UP_10"
-                                        win_history.clear()
-                                # LEVEL 2 -> 3 (Climb)
-                                elif level_idx == 1:
-                                    if ratio >= 0.5 and liquidity >= (cost_at_25 * 10):
-                                        denom = amy_ladder[2]
-                                        amy_note = "UP_25"
-                                        win_history.clear()
-                                    elif ratio < 0.5:
-                                        denom = amy_ladder[0]
-                                        amy_note = "DOWN_05"
-                                        win_history.clear()
-                                # LEVEL 3 (Retreat)
-                                elif level_idx >= 2:
-                                    if ratio <= 0.5:
-                                        denom = amy_ladder[0]
-                                        amy_note = "DOWN_05"
-                                        win_history.clear()
-                        # ==========================================
-
+                        if amy_bot:
+                            denom, amy_note = amy_bot.decide_denom(denom, current_bankroll, floor)
+                        
+                        # 2. RUN HAND
                         random_hand = generate_random_hand_str(dealer_sim)
                         net, log_data = run_multihand_session(random_hand, lines, variant, denom, wheel_active)
                         current_bankroll += net
                         hands_played += 1
                         
-                        # Update History for Amy
-                        win_history.append(log_data["Wins"])
-                        
+                        # 3. AMY RECORD
+                        if amy_bot:
+                            amy_bot.record_result(log_data["Wins"])
+
+                        # 4. PROTOCOL CHECK
                         proto_trig = ""
-                        if protocol_mode and guardian:
+                        if guardian:
                             res = guardian.check(hands_played, current_bankroll)
                             if res:
                                 proto_trig = res; stop_reason = f"PROTOCOL ({res})"
                                 if logger:
-                                    log_data["Protocol_Trigger"] = res
-                                    log_data["Hand_ID"] = hands_played
-                                    log_data["Bankroll"] = round(current_bankroll, 2)
-                                    log_data["Amy_Trigger"] = amy_note
+                                    log_data.update({"Protocol_Trigger": res, "Hand_ID": hands_played, "Bankroll": round(current_bankroll, 2), "Amy_Trigger": amy_note})
                                     logger.log(log_data)
                                 break
                         
                         if logger:
-                            log_data["Protocol_Trigger"] = proto_trig
-                            log_data["Hand_ID"] = hands_played
-                            log_data["Bankroll"] = round(current_bankroll, 2)
-                            log_data["Amy_Trigger"] = amy_note
+                            log_data.update({"Protocol_Trigger": proto_trig, "Hand_ID": hands_played, "Bankroll": round(current_bankroll, 2), "Amy_Trigger": amy_note})
                             logger.log(log_data)
                             
                         if current_bankroll <= floor: stop_reason = "BUST"
