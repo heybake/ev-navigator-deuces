@@ -52,7 +52,7 @@ class SoundManager:
             self.sounds[name].play()
 
 # ==============================================================================
-# 🖼️ ASSET MANAGER (UPDATED to load Joker)
+# 🖼️ ASSET MANAGER
 # ==============================================================================
 class AssetManager:
     def __init__(self):
@@ -85,17 +85,14 @@ class AssetManager:
                     except Exception as e: print(f"Error loading {key}: {e}")
         print(f"Loaded {count} standard card images.")
 
-        # 2. Load Joker (NEW SECTION)
+        # 2. Load Joker (Optional, strictly IGT Deuces Wild uses 52 cards)
         joker_path = os.path.join(ASSET_DIR, "joker.png")
         if os.path.exists(joker_path):
             try:
                 img = pygame.image.load(joker_path).convert_alpha()
-                # Map the image to the 'JOKER' key used by the engine backend
                 self.cards['JOKER'] = pygame.transform.smoothscale(img, CARD_SIZE)
                 print("Loaded Joker image.")
             except Exception as e: print(f"Error loading Joker: {e}")
-        else:
-             print("Warning: joker.png not found.")
 
         # 3. Load Card Back
         back_path = os.path.join(ASSET_DIR, "back.png")
@@ -302,6 +299,7 @@ class IGT_Machine:
 
     def act_deal_draw(self):
         if self.state == "IDLE":
+            # --- DEAL PHASE ---
             cost = self.coins_bet * self.denom
             if self.bankroll < cost: return
             self.bankroll -= cost
@@ -310,6 +308,7 @@ class IGT_Machine:
             self.win_target = 0.0
             self.last_win_rank = None
             
+            # Deal 5 cards from fresh deck
             self.hand, self.stub = self.core.deal_hand()
             self.held_indices = []
             
@@ -323,15 +322,27 @@ class IGT_Machine:
             self.btn_deal.text = "DRAW"
             
         elif self.state == "DECISION":
-            held_cards = [self.hand[i] for i in self.held_indices]
-            final_list = self.core.draw_from_stub(held_cards, self.stub)
-            self.hand = final_list[0]
+            # --- DRAW PHASE (FIXED) ---
+            # 1. Shuffle the remaining cards (Critical for RNG integrity)
+            self.core.shuffle(self.stub)
             
+            # 2. Iterate through all 5 slots
+            for i in range(5):
+                # If this slot was NOT held by the player...
+                if i not in self.held_indices:
+                    # ...Replace the card in this slot with a new one from the stub
+                    if self.stub:
+                        new_card = self.stub.pop(0) 
+                        self.hand[i] = new_card
+            
+            # 3. Update the UI
             for i, c in enumerate(self.hand):
                 self.cards[i].card_val = c
-                self.cards[i].is_held = False
+                self.cards[i].is_held = False # Reset hold status
+            
             self.sound.play("deal")
             
+            # 4. Evaluate
             rank, mult = self.sim.evaluate_hand_score(self.hand)
             win_val = (mult * self.coins_bet) * self.denom
             
