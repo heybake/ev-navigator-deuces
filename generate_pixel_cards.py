@@ -30,7 +30,8 @@ SUITS = {
 FACE_CARD_IMAGES = {
     'J': os.path.join(ASSETS_DIR, "jack.png"),
     'Q': os.path.join(ASSETS_DIR, "queen.png"),
-    'K': os.path.join(ASSETS_DIR, "king.png")
+    'K': os.path.join(ASSETS_DIR, "king.png"),
+    'A': os.path.join(ASSETS_DIR, "ace.png")
 }
 
 # === Font Loading ===
