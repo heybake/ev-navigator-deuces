@@ -1,12 +1,13 @@
 """
 dw_sim_engine.py
-CORE SIMULATION LOGIC (v4.2 - Fully Patched)
+CORE SIMULATION LOGIC (v4.3 - Flush Logic Hotfix)
 
 Features:
 - Robust Input Normalization
 - Bonus Deuces Logic (4 Deuces w/ Ace, 5 Aces)
 - Wheel Mechanics Stub
 - Bet Amount Calculation (Fixes Multi-Hand Crash)
+- FIXED: Wild Flush Logic (Deuces ignore suit)
 """
 
 import random
@@ -102,11 +103,18 @@ class DeucesWildSim:
         Main Evaluator (Standard + Bonus Logic).
         """
         ranks = [c[0] for c in hand]
-        suits = [c[1] for c in hand]
+        
+        # --- FIXED FLUSH LOGIC ---
+        # A flush relies ONLY on the suits of non-deuce cards.
+        # If I have 3 Clubs and 2 Deuces (Heart, Spade), it IS a Club Flush.
+        non_deuce_suits = [c[1] for c in hand if c[0] != '2']
+        
         deuce_count = ranks.count('2')
         non_deuces = [r for r in ranks if r != '2']
         rank_counts = Counter(non_deuces)
-        is_flush = len(set(suits)) == 1
+        
+        # If set has 0 (all deuces) or 1 item, it's a flush.
+        is_flush = len(set(non_deuce_suits)) <= 1
         
         # 1. NATURAL ROYAL
         if deuce_count == 0 and is_flush:

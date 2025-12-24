@@ -71,6 +71,16 @@ class TestHandEvaluator(unittest.TestCase):
         expected = ['Th', '2s', '2c', '5d', 'As'] 
         self.assertEqual(clean, expected)
 
+    def test_dirty_flush_integration(self):
+        """
+        REGRESSION TEST: Verifies the 'Wild Flush' fix in the Sim Engine.
+        Hearts + Diamond Deuce should equal FLUSH.
+        """
+        # 4 Hearts + 1 Diamond Deuce
+        hand = ["8h", "9h", "2d", "Qh", "6h"]
+        rank, _ = self.sim.evaluate_hand(hand)
+        self.assertEqual(rank, "FLUSH", "Sim Engine failed to identify Mixed-Suit Flush")
+
 
 # ==========================================
 # 💎 NEW: BONUS DEUCES LOGIC TESTS

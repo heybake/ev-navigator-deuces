@@ -3,6 +3,7 @@ import os
 import sys
 # Ensure dw_sim_engine.py is in the same directory or python path
 import dw_sim_engine
+from dw_pay_constants import PAYTABLES
 
 # ==============================================================================
 # ⚙️ CONFIGURATION & CONSTANTS
@@ -190,10 +191,13 @@ class CardSlot:
         screen.blit(img, self.rect)
 
         if self.is_held and self.is_face_up:
-            pygame.draw.rect(screen, C_HELD_BORDER, self.rect, 4)
-            stamp_rect = pygame.Rect(self.rect.centerx - 40, self.rect.bottom - 45, 80, 26)
-            pygame.draw.rect(screen, C_HELD_BORDER, stamp_rect)
-            lbl = self.assets.font_ui.render("HELD", True, C_BLACK)
+            # 1. No Border (Clean look)
+            # 2. Red Stamp FLOATING ABOVE CARD (y - 30)
+            stamp_rect = pygame.Rect(self.rect.centerx - 40, self.rect.top - 30, 80, 26)
+            pygame.draw.rect(screen, C_DIGITAL_RED, stamp_rect)
+            
+            # 3. Yellow Text
+            lbl = self.assets.font_ui.render("HELD", True, C_YEL_TEXT)
             screen.blit(lbl, lbl.get_rect(center=stamp_rect.center))
 
 class PaytableDisplay:
@@ -201,18 +205,66 @@ class PaytableDisplay:
         self.assets = assets
         self.data = pay_data
         self.rect = pygame.Rect(30, 20, 964, 280)
-        self.rows = ["NATURAL_ROYAL", "FOUR_DEUCES", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]
-        self.labels = {"NATURAL_ROYAL": "ROYAL FLUSH", "FOUR_DEUCES": "4 DEUCES", "WILD_ROYAL": "WILD ROYAL", "FIVE_OAK": "5 OF A KIND", "STRAIGHT_FLUSH": "STR FLUSH", "FOUR_OAK": "4 OF A KIND", "FULL_HOUSE": "FULL HOUSE", "FLUSH": "FLUSH", "STRAIGHT": "STRAIGHT", "THREE_OAK": "3 OF A KIND"}
+        
+        # 1. Master List of all possible display rows in Rank Order
+        master_order = [
+            "NATURAL_ROYAL", 
+            "FOUR_DEUCES_ACE", 
+            "FOUR_DEUCES", 
+            "FIVE_ACES", 
+            "WILD_ROYAL", 
+            "FIVE_OAK", 
+            "STRAIGHT_FLUSH", 
+            "FOUR_OAK", 
+            "FULL_HOUSE", 
+            "FLUSH", 
+            "STRAIGHT", 
+            "THREE_OAK"
+        ]
+        
+        # 2. Dynamic Filter: Only include rows that exist in the current variant's data
+        self.rows = [key for key in master_order if key in pay_data]
+        
+        # 3. Label Map (Human Readable)
+        self.labels = {
+            "NATURAL_ROYAL": "ROYAL FLUSH", 
+            "FOUR_DEUCES_ACE": "4 DEUCES + A",
+            "FOUR_DEUCES": "4 DEUCES", 
+            "FIVE_ACES": "5 ACES",
+            "WILD_ROYAL": "WILD ROYAL", 
+            "FIVE_OAK": "5 OF A KIND", 
+            "STRAIGHT_FLUSH": "STR FLUSH", 
+            "FOUR_OAK": "4 OF A KIND", 
+            "FULL_HOUSE": "FULL HOUSE", 
+            "FLUSH": "FLUSH", 
+            "STRAIGHT": "STRAIGHT", 
+            "THREE_OAK": "3 OF A KIND"
+        }
 
     def draw(self, screen, coins_bet, winning_rank=None):
+        # 1. Background (Bottom Layer)
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
-        pygame.draw.rect(screen, C_WHITE, self.rect, 2)
         
-        row_h = 25
+        # --- DYNAMIC ROW HEIGHT LOGIC ---
+        # Standard games have ~10 rows (fits in 280px with 25px spacing)
+        # Bonus Deuces has 12 rows. We must shrink spacing to 22px to fit.
+        if len(self.rows) > 10:
+            row_h = 22
+        else:
+            row_h = 25
+        
         col_w = (self.rect.width - 160) // 5
         active_x = self.rect.left + 160 + ((coins_bet - 1) * col_w)
+        
+        # 2. Red Active Column (Draw BEFORE grid lines and border)
         pygame.draw.rect(screen, C_RED_ACTIVE, (active_x, self.rect.top, col_w, self.rect.height))
         
+        # 3. Vertical Grid Lines
+        for i in range(5):
+            x = self.rect.left + 160 + (i * col_w)
+            pygame.draw.line(screen, C_YEL_TEXT, (x, self.rect.top), (x, self.rect.bottom), 2)
+        
+        # 4. Text Content
         start_y = self.rect.top + 15
         for i, key in enumerate(self.rows):
             y = start_y + (i * row_h)
@@ -225,8 +277,12 @@ class PaytableDisplay:
                 val = base * c
                 if key == "NATURAL_ROYAL" and c == 5: val = 4000
                 x = self.rect.left + 160 + ((c-1) * col_w)
-                val_surf = self.assets.font_grid.render(str(val), True, C_WHITE)
+                # Render numbers in YELLOW
+                val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
                 screen.blit(val_surf, (x + col_w - val_surf.get_width() - 10, y))
+
+        # 5. Outer Border (Top Layer - Ensures clean frame)
+        pygame.draw.rect(screen, C_YEL_TEXT, self.rect, 2)
 
 # ==============================================================================
 # 🎮 MAIN SYSTEM
@@ -245,8 +301,10 @@ class IGT_Machine:
         self.assets = AssetManager()
         self.sound = SoundManager()
         
-        # Initialize Engine
-        self.sim = dw_sim_engine.DeucesWildSim(variant="NSUD")
+        # Initialize Engine with variant cycling logic
+        self.available_variants = list(PAYTABLES.keys())
+        self.variant_idx = 0  # Default to NSUD (Index 0)
+        self.sim = dw_sim_engine.DeucesWildSim(variant=self.available_variants[self.variant_idx])
         self.core = self.sim.core
         
         self.paytable = PaytableDisplay(self.assets, self.sim.paytable)
@@ -272,8 +330,8 @@ class IGT_Machine:
     def _init_buttons(self):
         y = 700; w, h = 90, 50
         self.buttons = [
-            PhysicalButton((30, y, w, h), "MORE GAMES", lambda: None),
-            PhysicalButton((130, y, w, h), "SPEED", lambda: None),
+            PhysicalButton((30, y, 120, h), "MORE GAMES", self.act_cycle_variant),
+            PhysicalButton((160, y, w, h), "SPEED", lambda: None),
             PhysicalButton((400, y, w, h), "BET ONE", self.act_bet_one),
             PhysicalButton((500, y, w, h), "BET MAX", self.act_bet_max),
             PhysicalButton((800, y, 150, h), "DEAL", self.act_deal_draw, color=(255, 215, 0))
@@ -285,6 +343,27 @@ class IGT_Machine:
         self.meter_bet = ClickableMeter(500, 630, "BET", C_DIGITAL_YEL, default_is_credits=True)
         self.meter_credit = ClickableMeter(900, 630, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
         self.meters = [self.meter_win, self.meter_bet, self.meter_credit]
+
+    def act_cycle_variant(self):
+        """Cycles through available game variants (NSUD -> Airport -> Bonus, etc.)"""
+        if self.state != "IDLE": return # Lockout during play
+
+        # 1. Increment Index
+        self.variant_idx = (self.variant_idx + 1) % len(self.available_variants)
+        new_variant = self.available_variants[self.variant_idx]
+
+        # 2. Re-Initialize Engine
+        print(f"Switching to {new_variant}...")
+        self.sim = dw_sim_engine.DeucesWildSim(variant=new_variant)
+        self.core = self.sim.core # Re-link core (physics remains same, but good practice)
+
+        # 3. Update Paytable GUI
+        # We must create a new display object because it caches the pay data
+        self.paytable = PaytableDisplay(self.assets, self.sim.paytable)
+
+        # Optional: Flash a message or sound to confirm switch
+        self.sound.play("bet")
+        pygame.display.set_caption(f"IGT Game King Replica ({new_variant})")
 
     def act_bet_one(self):
         if self.state != "IDLE": return
@@ -317,6 +396,14 @@ class IGT_Machine:
                 self.cards[i].is_face_up = True
                 self.cards[i].is_held = False
             
+            # --- PRE-DRAW EVALUATION (Fixes Pat Hand Indicator) ---
+            # Evaluate the dealt hand immediately to light up the paytable
+            rank, mult = self.sim.evaluate_hand_score(self.hand)
+            if mult > 0:
+                self.last_win_rank = rank
+            else:
+                self.last_win_rank = None
+            
             self.sound.play("deal")
             self.state = "DECISION"
             self.btn_deal.text = "DRAW"
@@ -338,7 +425,7 @@ class IGT_Machine:
             # 3. Update the UI
             for i, c in enumerate(self.hand):
                 self.cards[i].card_val = c
-                self.cards[i].is_held = False # Reset hold status
+                # REMOVED RESET LINE: self.cards[i].is_held = False 
             
             self.sound.play("deal")
             
@@ -351,6 +438,9 @@ class IGT_Machine:
                 self.last_win_rank = rank
                 self.win_target = win_val 
                 self.bankroll += win_val
+            else:
+                # Clear highlight if final hand is a loser
+                self.last_win_rank = None
             
             self.state = "IDLE"
             self.btn_deal.text = "DEAL"
@@ -367,6 +457,34 @@ class IGT_Machine:
                     slot.is_held = not slot.is_held
                     if slot.is_held: self.held_indices.append(i)
                     else: self.held_indices.remove(i)
+
+    def draw_variant_label(self):
+        """Draws the dynamic variant label in the bottom-left corner."""
+        label_text = f"Deuces Wild ({self.sim.variant})"
+        text_surf = self.assets.font_ui.render(label_text, True, C_WHITE)
+        # Position: Left-aligned, near the bottom edge
+        self.screen.blit(text_surf, (20, 750))
+
+    def draw_denom_badge(self):
+        """Draws the yellow oval indicator for the denomination."""
+        # 1. Convert to Cents
+        cents = int(self.denom * 100)
+        text = f"{cents}¢"
+        
+        # 2. Define Shape (Between BET MAX and DEAL)
+        center_x, center_y = 730, 725
+        radius_x, radius_y = 40, 25
+        rect = pygame.Rect(center_x - radius_x, center_y - radius_y, radius_x * 2, radius_y * 2)
+        
+        # 3. Draw Oval
+        pygame.draw.ellipse(self.screen, (255, 215, 0), rect) # Gold Fill
+        pygame.draw.ellipse(self.screen, C_BLACK, rect, 2)    # Black Border
+        
+        # 4. Draw Text
+        font = pygame.font.SysFont("timesnewroman", 28, bold=True)
+        txt_surf = font.render(text, True, (200, 0, 0)) # Red Text
+        txt_rect = txt_surf.get_rect(center=(center_x, center_y))
+        self.screen.blit(txt_surf, txt_rect)
 
     def draw(self):
         self.screen.fill(C_BLACK)
@@ -387,6 +505,12 @@ class IGT_Machine:
         self.meter_bet.draw(self.screen, self.assets, self.coins_bet * self.denom, self.denom)
         self.meter_credit.draw(self.screen, self.assets, self.bankroll, self.denom)
         
+        # Draw the dynamic variant label
+        self.draw_variant_label()
+        
+        # Draw the denom badge
+        self.draw_denom_badge()
+
         mouse_pos = pygame.mouse.get_pos()
         mouse_down = pygame.mouse.get_pressed()[0]
         for b in self.buttons:
