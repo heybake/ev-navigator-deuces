@@ -63,5 +63,19 @@ PAYTABLES = {
         "THREE_OAK": 1,
         "NOTHING": 0,
         "ERROR": 0
-    }
+    },
+    "BONUS_DEUCES": {
+        "NATURAL_ROYAL": 800,
+        "FOUR_DEUCES_ACE": 400,
+        "FOUR_DEUCES": 200,
+        "FIVE_ACES": 80,
+        "WILD_ROYAL": 25,
+        "FIVE_OAK": 20,
+        "STRAIGHT_FLUSH": 10,
+        "FOUR_OAK": 4,
+        "FULL_HOUSE": 4,
+        "FLUSH": 3,
+        "STRAIGHT": 1,
+        "THREE_OAK": 1
+    },
 }

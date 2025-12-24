@@ -13,6 +13,13 @@ from dw_exact_solver import calculate_exact_ev, evaluate_hand as solver_evaluate
 # NEW: Import the Registry for Verification
 from dw_pay_constants import PAYTABLES as MASTER_REGISTRY
 
+# Try to import the Strategy Generator Classifier for testing
+try:
+    from dw_strategy_generator import classify_hold
+    GENERATOR_AVAILABLE = True
+except ImportError:
+    GENERATOR_AVAILABLE = False
+
 try:
     from dw_plot_tools import classify_session
     PLOT_TOOLS_AVAILABLE = True
@@ -63,6 +70,86 @@ class TestHandEvaluator(unittest.TestCase):
         # Note: v3.2 Engine usually outputs capitalized rank/suit like 'Th', '2s'
         expected = ['Th', '2s', '2c', '5d', 'As'] 
         self.assertEqual(clean, expected)
+
+
+# ==========================================
+# 💎 NEW: BONUS DEUCES LOGIC TESTS
+# ==========================================
+class TestBonusDeucesLogic(unittest.TestCase):
+    """
+    Verifies the specific kicker logic for 'Bonus Deuces' games.
+    """
+    def setUp(self):
+        self.sim_bonus = DeucesWildSim(variant="BONUS_DEUCES")
+        self.sim_std = DeucesWildSim(variant="NSUD")
+
+    def test_five_aces_detection(self):
+        # 1 Deuce + 4 Aces = 5 Aces
+        hand = ["2s", "Ah", "Ad", "Ac", "As"]
+        
+        # In Bonus Deuces, this is special (Pays 80)
+        rank_b, pay_b = self.sim_bonus.evaluate_hand(hand)
+        self.assertEqual(rank_b, "FIVE_ACES")
+        self.assertEqual(pay_b, 80)
+
+        # In NSUD, this is just 5OAK (Pays 16)
+        rank_s, pay_s = self.sim_std.evaluate_hand(hand)
+        self.assertEqual(rank_s, "FIVE_OAK")
+        self.assertEqual(pay_s, 16)
+
+    def test_four_deuces_with_ace(self):
+        # 4 Deuces + Ace Kicker
+        hand = ["2s", "2h", "2d", "2c", "As"]
+        
+        # In Bonus Deuces, this is special (Pays 400)
+        rank_b, pay_b = self.sim_bonus.evaluate_hand(hand)
+        self.assertEqual(rank_b, "FOUR_DEUCES_ACE")
+        self.assertEqual(pay_b, 400)
+        
+        # In NSUD, this is just 4 Deuces (Pays 200)
+        rank_s, pay_s = self.sim_std.evaluate_hand(hand)
+        self.assertEqual(rank_s, "FOUR_DEUCES")
+        self.assertEqual(pay_s, 200)
+
+    def test_four_deuces_no_kicker(self):
+        # 4 Deuces + King (Not Ace)
+        hand = ["2s", "2h", "2d", "2c", "Ks"]
+        
+        # Should be standard 4 Deuces for BOTH
+        rank_b, pay_b = self.sim_bonus.evaluate_hand(hand)
+        self.assertEqual(rank_b, "FOUR_DEUCES")
+        self.assertEqual(pay_b, 200)
+
+
+# ==========================================
+# 🔬 NEW: STRATEGY CLASSIFIER TESTS (Added for v5.0)
+# ==========================================
+@unittest.skipUnless(GENERATOR_AVAILABLE, "Strategy Generator not importable")
+class TestStrategyClassifier(unittest.TestCase):
+    """
+    Verifies the 'Microscope' logic in the Strategy Generator.
+    Ensures that seeded hands are labeled correctly.
+    """
+    def test_classify_four_deuces_ace(self):
+        hand = ['2s', '2c', '2h', '2d', 'As']
+        label = classify_hold(hand)
+        self.assertEqual(label, "4_DEUCES_ACE")
+
+    def test_classify_generic_four_deuces(self):
+        hand = ['2s', '2c', '2h', '2d', 'Ks']
+        label = classify_hold(hand)
+        self.assertEqual(label, "4_DEUCES")
+
+    def test_classify_five_aces(self):
+        # 4 Aces + 1 Deuce
+        hand = ['As', 'Ac', 'Ah', 'Ad', '2s']
+        label = classify_hold(hand)
+        self.assertEqual(label, "FIVE_ACES")
+
+    def test_classify_natural_royal(self):
+        hand = ['Ts', 'Js', 'Qs', 'Ks', 'As']
+        label = classify_hold(hand)
+        self.assertEqual(label, "NATURAL_ROYAL")
 
 
 class TestDualCoreStrategy(unittest.TestCase):
@@ -191,12 +278,57 @@ class TestProtocolGuardian(unittest.TestCase):
 class TestExactSolver(unittest.TestCase):
     def setUp(self):
         self.pt = PAYTABLES["NSUD"]
+        # NEW: Load Bonus table for math verification
+        self.pt_bonus = MASTER_REGISTRY["BONUS_DEUCES"]
 
     def test_solver_royal_flush_ev(self):
         hand = ['ts', 'js', 'qs', 'ks', 'as']
         hold_indices = [0, 1, 2, 3, 4]
         ev = calculate_exact_ev(hand, hold_indices, self.pt)
         self.assertEqual(ev, 4000.0)
+
+    def test_solver_case_insensitivity(self):
+        """NEW: Ensures 'ah' and 'Ah' are treated equally."""
+        hand_lower = ['ah', 'kh', 'qh', 'jh', 'th']
+        payout = solver_evaluate(hand_lower, self.pt)
+        self.assertEqual(payout, 800) # Natural Royal
+
+    def test_solver_wild_flush_recognition(self):
+        """NEW: The 'Dirty Flush' Bug Fix (2s completing Hearts)."""
+        # 2s is a Spade, but Wild. Should complete Heart flush.
+        hand = ['2s', '4h', '8h', 'Kh', '2h']
+        payout = solver_evaluate(hand, self.pt)
+        self.assertEqual(payout, 3, "Solver failed to recognize Wild Flush")
+
+    def test_solver_bonus_math(self):
+        """NEW: Verifies Solver uses Bonus Payouts correctly."""
+        # 5 Aces (Should be 80 coins)
+        hand_5a = ['As', 'Ac', 'Ah', 'Ad', '2s']
+        self.assertEqual(solver_evaluate(hand_5a, self.pt_bonus), 80)
+        
+        # 4 Deuces + Ace (Should be 400 coins)
+        hand_4da = ['2s', '2c', '2h', '2d', 'As']
+        self.assertEqual(solver_evaluate(hand_4da, self.pt_bonus), 400)
+    
+    def test_four_deuces_bonus_ev_precision(self):
+        """
+        NEW: Verifies the exact weighted EV for holding 4 Deuces in Bonus Poker.
+        Math: (4 Aces * 2000 coins + 43 Others * 1000 coins) / 47 cards
+        Expected: ~1085.10638
+        """
+        # Hand with 4 Deuces and junk kicker
+        hand = ['2s', '2h', '2c', '2d', '9s']
+        hold_indices = [0, 1, 2, 3] # Hold the 4 deuces
+        
+        # Calculate EV using the Bonus Paytable
+        ev = calculate_exact_ev(hand, hold_indices, self.pt_bonus)
+        
+        # Weighted Average: (4/47 * 2000) + (43/47 * 1000)
+        # 2000 = 400 * 5 (Max Bet)
+        # 1000 = 200 * 5 (Max Bet)
+        expected = 51000 / 47
+        
+        self.assertAlmostEqual(ev, expected, places=4, msg="EV calculation for 4 Deuces mismatch")
 
     def test_solver_dead_hand_ev(self):
         hand = ['2s', '2h', '2c', '2d', '3s']
@@ -273,6 +405,6 @@ class TestPayTableQuarantine(unittest.TestCase):
 
 if __name__ == '__main__':
     print("========================================")
-    print("🧬 DEUCES WILD INTEGRITY CHECK (v3.2)")
+    print("🧬 DEUCES WILD INTEGRITY CHECK (v5.1)")
     print("========================================")
     unittest.main(verbosity=2)

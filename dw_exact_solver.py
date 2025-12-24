@@ -1,266 +1,220 @@
-import itertools
-import sys
-import multiprocessing
-from dw_pay_constants import PAYTABLES  # <--- NEW IMPORT: Single Source of Truth
+"""
+dw_exact_solver.py
+THE MATHEMATICAL BRAIN (v5.1 - Patch)
 
-# ==========================================
-# 🧬 CONFIGURATION: PAY TABLES (Per Credit)
-# ==========================================
-# Multiplied by 5 later for Max Bet display
-# [REMOVED: Hard-coded PAYTABLES dictionary]
-# Source: dw_pay_constants.py (ADR: The Pay Table Quarantine)
+Features:
+- Exact Expected Value (EV) calculation.
+- Supports Bonus Deuces (5 Aces, 4 Deuces w/ Ace).
+- FIXED: Case-Insensitive Inputs.
+- FIXED: Wild Flush Logic (Deuces ignore suit).
+"""
 
-# ==========================================
-# 🛠️ CORE UTILITIES
-# ==========================================
+from itertools import combinations
+from collections import Counter
+from dw_pay_constants import PAYTABLES
 
-def get_rank_val(card_str):
-    """Converts card string (e.g., 'Th', '2s') to integer rank."""
-    if card_str.startswith('10'):
-        r = 'T'
+def get_rank_index(rank_char):
+    # Ensure rank is found regardless of case, though we normalize before calling.
+    return "23456789TJQKA".index(rank_char.upper())
+
+def get_deck():
+    ranks = "23456789TJQKA"
+    suits = "shdc"
+    return [r+s for r in ranks for s in suits]
+
+def evaluate_hand(hand, pay_table):
+    """
+    Evaluates a 5-card hand against the paytable.
+    Includes Bonus Deuces logic (Kickers).
+    """
+    # -------------------------------------------------------
+    # 0. NORMALIZE INPUTS (Fixes Case Sensitivity Crash)
+    # -------------------------------------------------------
+    # Force ranks to Upper, suits to lower.
+    # Handles inputs like 'ts', 'Ah', '2C'
+    clean_hand = [(c[0].upper(), c[1].lower()) for c in hand]
+    
+    ranks = [c[0] for c in clean_hand]
+    suits = [c[1] for c in clean_hand]
+    deuce_count = ranks.count('2')
+    non_deuces = [r for r in ranks if r != '2']
+    
+    # -------------------------------------------------------
+    # 0. FLUSH LOGIC (Fixes Wild Flush Bug)
+    # -------------------------------------------------------
+    # A flush exists if all NON-DEUCE cards share the same suit.
+    # The deuces simply adopt that suit.
+    non_deuce_suits = [c[1] for c in clean_hand if c[0] != '2']
+    if not non_deuce_suits:
+        is_flush = True # 5 Deuces is technically suited (doesn't matter, pays 5OAK/4Deuces)
     else:
-        r = card_str[0].upper()
+        is_flush = len(set(non_deuce_suits)) == 1
+
+    # -------------------------------------------------------
+    # 1. NATURAL ROYAL FLUSH
+    # -------------------------------------------------------
+    # Must be 0 deuces and "Natural" flush (all actual suits match)
+    # Re-check suits including deuces for Natural Royal requirement
+    is_natural_suited = len(set(suits)) == 1
     
-    mapping = {'2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, 
-               '9':9, 'T':10, 'J':11, 'Q':12, 'K':13, 'A':14}
-    return mapping[r]
+    if deuce_count == 0 and is_natural_suited:
+        if set(ranks) == set("TJQKA"):
+            return pay_table["NATURAL_ROYAL"]
 
-def normalize_hand(input_str):
-    """Parses user input like '2h 2s 10c' into ['2h', '2s', 'tc'] (lowercase suits)"""
-    parts = input_str.strip().split()
-    # Handle comma separation if user pastes list like "2h, 2s, 5c"
-    if len(parts) == 1 and ',' in input_str:
-        parts = input_str.replace(',', ' ').split()
+    # -------------------------------------------------------
+    # 2. FOUR DEUCES (Check Kicker)
+    # -------------------------------------------------------
+    if deuce_count == 4:
+        if non_deuces and non_deuces[0] == 'A':
+            if "FOUR_DEUCES_ACE" in pay_table:
+                return pay_table["FOUR_DEUCES_ACE"]
+        return pay_table["FOUR_DEUCES"]
 
-    normalized = []
-    valid_ranks = "23456789TJQKA"
-    valid_suits = "SHDC"
-    
-    for p in parts:
-        p = p.upper()
-        if p.startswith("10"):
-            p = "T" + p[2:]
-            
-        if len(p) < 2: continue # Skip empty garbage
-            
-        r, s = p[0], p[1]
-        # Basic validation
-        if r not in valid_ranks or s not in valid_suits:
-             continue 
-        normalized.append(p.lower())
-        
-    if len(normalized) != 5:
-        return None
-        
-    return normalized
-
-# ==========================================
-# 🧠 EVALUATION ENGINE (PATCHED v2.1)
-# ==========================================
-
-def evaluate_hand(hand, pt):
-    ranks = [c[0] for c in hand]
-    deuces = ranks.count('2')
-    non_deuce_ranks = [get_rank_val(c) for c in hand if c[0] != '2']
-    non_deuce_ranks.sort()
-    
-    # Flush Check (Ignore Deuce Suits)
-    non_deuce_suits = [c[1] for c in hand if c[0] != '2']
-    if len(non_deuce_suits) == 0: is_flush = True 
-    else: is_flush = len(set(non_deuce_suits)) == 1
-    
-    # 1. Natural Royal
-    if is_flush and deuces == 0 and set(ranks) == {'t','j','q','k','a'}: return pt["NATURAL_ROYAL"]
-    # 2. Four Deuces
-    if deuces == 4: return pt["FOUR_DEUCES"]
-    # 3. Wild Royal
-    needed = {10,11,12,13,14}
-    if is_flush and deuces > 0 and set(non_deuce_ranks).issubset(needed): return pt["WILD_ROYAL"]
-
-    # 4. Five of a Kind
-    counts = {x:non_deuce_ranks.count(x) for x in set(non_deuce_ranks)}
-    max_k = max(counts.values()) if counts else 0
-    if deuces + max_k >= 5: return pt["FIVE_OAK"]
-
-    # 5. Straight Flush
+    # -------------------------------------------------------
+    # 3. WILD ROYAL FLUSH
+    # -------------------------------------------------------
     if is_flush:
-        if not non_deuce_ranks: return pt["STRAIGHT_FLUSH"]
-        span = non_deuce_ranks[-1] - non_deuce_ranks[0]
-        if len(set(non_deuce_ranks)) == len(non_deuce_ranks):
-             if span <= 4: return pt["STRAIGHT_FLUSH"]
-             if 14 in non_deuce_ranks: # Wheel
-                 wheel_vals = [1 if x==14 else x for x in non_deuce_ranks]
-                 wheel_vals.sort()
-                 if (wheel_vals[-1] - wheel_vals[0]) <= 4: return pt["STRAIGHT_FLUSH"]
+        if all(r in set("TJQKA") for r in non_deuces):
+            return pay_table["WILD_ROYAL"]
 
-    # 6. Four of a Kind
-    if deuces + max_k >= 4: return pt["FOUR_OAK"]
+    # -------------------------------------------------------
+    # 4. FIVE OF A KIND (Check 5 Aces)
+    # -------------------------------------------------------
+    if non_deuces:
+        counts = Counter(non_deuces)
+        most_common_rank, count = counts.most_common(1)[0]
+        total_count = count + deuce_count
+    else:
+        total_count = deuce_count
 
-    # 7. Full House
-    if deuces == 0:
-        if 3 in counts.values() and 2 in counts.values(): return pt["FULL_HOUSE"]
-    if deuces == 1:
-        if list(counts.values()).count(2) == 2: return pt["FULL_HOUSE"]
+    if total_count >= 5:
+        if non_deuces and all(r == 'A' for r in non_deuces):
+             if "FIVE_ACES" in pay_table:
+                return pay_table["FIVE_ACES"]
+        return pay_table["FIVE_OAK"]
+
+    # -------------------------------------------------------
+    # 5. STRAIGHT FLUSH
+    # -------------------------------------------------------
+    if is_flush:
+        idx_ranks = sorted([get_rank_index(r) for r in non_deuces])
+        if not idx_ranks:
+            pass 
+        else:
+            span = idx_ranks[-1] - idx_ranks[0]
+            distinct_count = len(set(idx_ranks))
+            valid_sf = False
             
-    # 8. Flush
-    if is_flush: return pt["FLUSH"]
-    
-    # 9. Straight
-    unique_vals = sorted(list(set(non_deuce_ranks)))
-    if len(unique_vals) + deuces >= 5:
-        span = unique_vals[-1] - unique_vals[0]
-        if span <= 4: return pt["STRAIGHT"]
-        if 14 in unique_vals:
-            wheel = [1 if x==14 else x for x in unique_vals]
-            wheel.sort()
-            if (wheel[-1] - wheel[0]) <= 4: return pt["STRAIGHT"]
+            if span <= 4 and deuce_count >= (span + 1 - distinct_count):
+                valid_sf = True
+            
+            if 12 in idx_ranks and not valid_sf:
+                wheel_ranks = sorted([-1 if r == 12 else r for r in idx_ranks])
+                w_span = wheel_ranks[-1] - wheel_ranks[0]
+                if w_span <= 4 and deuce_count >= (w_span + 1 - distinct_count):
+                    valid_sf = True
+                    
+            if valid_sf:
+                return pay_table["STRAIGHT_FLUSH"]
 
-    # 10. Three of a Kind
-    if deuces + max_k >= 3: return pt["THREE_OAK"]
-        
+    # -------------------------------------------------------
+    # 6. FOUR OF A KIND
+    # -------------------------------------------------------
+    if total_count >= 4:
+        return pay_table["FOUR_OAK"]
+
+    # -------------------------------------------------------
+    # 7. FULL HOUSE
+    # -------------------------------------------------------
+    is_full_house = False
+    if deuce_count == 0:
+        counts = Counter(non_deuces)
+        if len(counts) == 2 and 3 in counts.values(): is_full_house = True
+    elif deuce_count == 1:
+        counts = Counter(non_deuces)
+        if len(counts) == 2 and list(counts.values()) == [2, 2]: is_full_house = True
+            
+    if is_full_house:
+        return pay_table["FULL_HOUSE"]
+
+    # -------------------------------------------------------
+    # 8. FLUSH
+    # -------------------------------------------------------
+    if is_flush:
+        return pay_table["FLUSH"]
+
+    # -------------------------------------------------------
+    # 9. STRAIGHT
+    # -------------------------------------------------------
+    idx_ranks = sorted([get_rank_index(r) for r in non_deuces])
+    distinct_ranks = sorted(list(set(idx_ranks)))
+    span = distinct_ranks[-1] - distinct_ranks[0] if distinct_ranks else 0
+    distinct_count = len(distinct_ranks)
+    
+    valid_straight = False
+    if span <= 4 and deuce_count >= (5 - distinct_count):
+         valid_straight = True
+         
+    if 12 in distinct_ranks and not valid_straight:
+         wheel_ranks = sorted([-1 if r == 12 else r for r in distinct_ranks])
+         w_span = wheel_ranks[-1] - wheel_ranks[0]
+         if w_span <= 4 and deuce_count >= (5 - distinct_count):
+             valid_straight = True
+             
+    if valid_straight:
+        return pay_table["STRAIGHT"]
+
+    # -------------------------------------------------------
+    # 10. THREE OF A KIND
+    # -------------------------------------------------------
+    if total_count >= 3:
+        return pay_table["THREE_OAK"]
+
     return 0
 
 # ==========================================
-# 🔢 THE ENUMERATION SOLVER
+# 🧠 EXACT EV ENGINE
 # ==========================================
 
-def calculate_exact_ev(hand_str_list, hold_indices, pt):
-    suits = ['s', 'h', 'd', 'c']
-    ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
-    full_deck = [r.lower()+s for r in ranks for s in suits]
+def calculate_ev_for_hold(hand, hold, pay_table):
+    deck = get_deck()
+    remaining_deck = [c for c in deck if c not in hand]
     
-    held_cards = [hand_str_list[i] for i in hold_indices]
-    stub = [c for c in full_deck if c not in hand_str_list]
-    draw_count = 5 - len(held_cards)
+    draw_count = 5 - len(hold)
     
-    possible_draws = itertools.combinations(stub, draw_count)
+    if draw_count == 0:
+        return evaluate_hand(hold, pay_table) * 5
     
     total_payout = 0
-    combinations = 0
+    possible_draws = list(combinations(remaining_deck, draw_count))
     
     for draw in possible_draws:
-        final_hand = held_cards + list(draw)
-        payout = evaluate_hand(final_hand, pt)
-        total_payout += payout
-        combinations += 1
+        final_hand = list(hold) + list(draw)
+        total_payout += evaluate_hand(final_hand, pay_table) * 5
         
-    ev = (total_payout / combinations) * 5 
-    return ev
+    return total_payout / len(possible_draws)
 
-def solve_hand_silent(hand, pt):
-    # Optimized solver that doesn't print debug info, just returns best hold
-    indices = range(5)
-    powerset = []
-    for i in range(len(indices) + 1):
-        powerset.extend(itertools.combinations(indices, i))
-    
-    best_ev = -1
+def calculate_exact_ev(hand, hold_indices, pay_table):
+    # Wrapper for Unit Tests
+    hold = [hand[i] for i in hold_indices]
+    return calculate_ev_for_hold(hand, hold, pay_table)
+
+def solve_hand_silent(hand, pay_table):
+    max_ev = -1.0
     best_hold = []
     
-    for hold_indices in powerset:
-        ev = calculate_exact_ev(hand, hold_indices, pt)
-        if ev > best_ev:
-            best_ev = ev
-            best_hold = [hand[i] for i in hold_indices]
-            
-    return best_hold, best_ev
-
-# ==========================================
-# ⚡ MULTIPROCESSING WORKER
-# ==========================================
-
-def worker_process_hand(args):
-    """
-    Worker function to process a single hand in a separate process.
-    args: (raw_hand_string, variant_name)
-    """
-    raw_hand, variant_name = args
-    pt = PAYTABLES[variant_name]
-    
-    hand = normalize_hand(raw_hand)
-    if not hand:
-        return f"[ERROR] Invalid Input: {raw_hand}"
-    
-    # Run the solver
-    bh, bev = solve_hand_silent(hand, pt)
-    
-    # Format output
-    held_str = " ".join(bh) if bh else "Discard All"
-    input_disp = " ".join(hand)
-    return f"Hand: {input_disp:<15} -> Hold: {held_str:<15} (EV: {bev:.4f})"
-
-# ==========================================
-# 🎮 INTERACTIVE MAIN LOOP
-# ==========================================
-
-if __name__ == "__main__":
-    # Support for Windows/Spawn methods
-    multiprocessing.freeze_support()
-
-    print("==========================================")
-    print("🧬 DEUCES WILD EXACT SOLVER (v3.2 - TRI-CORE)")
-    print("==========================================")
-    
-    current_variant = "NSUD"
-    
-    while True:
-        print(f"\n[Current Mode: {current_variant}]")
-        print("Options: (E)nter Hand | (B)atch Mode | (S)witch Variant | (Q)uit")
-        choice = input(">> ").strip().upper()
-        
-        if choice == 'Q':
-            break
-            
-        elif choice == 'S':
-            print("\nSelect Variant:")
-            print("1. NSUD (Aggressive: 16/10)")
-            print("2. AIRPORT (Defensive: 12/9)")
-            print("3. DBW (Hybrid: 16/13)")
-            v = input("Select (1/2/3): ").strip()
-            if v == '1': current_variant = "NSUD"
-            elif v == '2': current_variant = "AIRPORT"
-            elif v == '3': current_variant = "DBW"
-        
-        elif choice == 'E':
-            raw_hand = input("\nEnter Hand: ")
-            hand = normalize_hand(raw_hand)
-            if hand:
-                pt = PAYTABLES[current_variant]
-                bh, bev = solve_hand_silent(hand, pt)
-                held_str = " ".join(bh) if bh else "Discard All"
-                print(f"\n✅ Result: {held_str} (EV: {bev:.4f})")
-
-        elif choice == 'B':
-            print("\n📥 PASTE HANDS BELOW (One per line).")
-            print("   Press ENTER on a blank line to start processing.")
-            print("-" * 40)
-            
-            batch_hands = []
-            while True:
-                try:
-                    line = input()
-                except EOFError:
-                    break
-                if not line.strip():
-                    break
-                batch_hands.append(line)
-            
-            num_cores = multiprocessing.cpu_count()
-            print(f"\n🚀 Firing up {num_cores} cores to process {len(batch_hands)} hands...")
-            print(f"   (Calculates exact EV including 'Discard All' ~1.5m combos)")
-            print("-" * 60)
-            
-            # Create task list: Tuple of (HandString, VariantName)
-            tasks = [(h, current_variant) for h in batch_hands]
-            
-            # --- THE PARALLEL ENGINE ---
-            with multiprocessing.Pool(processes=num_cores) as pool:
-                # Map inputs to the worker function across all cores
-                results = pool.map(worker_process_hand, tasks)
+    for i in range(len(hand) + 1):
+        for hold in combinations(hand, i):
+            current_ev = calculate_ev_for_hold(hand, hold, pay_table)
+            if current_ev > max_ev:
+                max_ev = current_ev
+                best_hold = list(hold)
                 
-            # Print results as they are returned (in order)
-            for res in results:
-                print(res)
-            
-            print("-" * 60)
-            print("✅ Batch Complete.")
+    return best_hold, max_ev
+
+def solve_hand(hand, pay_table):
+    best_hold, max_ev = solve_hand_silent(hand, pay_table)
+    print(f"Hand: {hand}")
+    print(f"Best Hold: {best_hold}")
+    print(f"Max EV: {max_ev:.4f}")
+    return best_hold, max_ev
