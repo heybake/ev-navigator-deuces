@@ -1,16 +1,16 @@
 import pygame
 import os
 import sys
+import math # Needed for drawing arcs
 # Ensure dw_sim_engine.py is in the same directory or python path
 import dw_sim_engine
-# --- NEW: Import the Fast Solver for Instant Auto-Hold ---
+# Import the Fast Solver for Instant Auto-Hold
 import dw_fast_solver 
 from dw_pay_constants import PAYTABLES
 
 # ==============================================================================
 # ⚙️ CONFIGURATION & CONSTANTS
 # ==============================================================================
-# TRAINER MODE: We might expand this later, but starting at standard size
 SCREEN_W, SCREEN_H = 1024, 768 
 FPS = 60
 
@@ -22,8 +22,8 @@ C_YEL_TEXT    = (255, 255, 0)
 C_RED_ACTIVE  = (180, 0, 0)
 C_DIGITAL_RED = (255, 50, 50)
 C_DIGITAL_YEL = (255, 255, 50)
-C_DIGITAL_GRN = (50, 205, 50)  # Bright Green for ON state
-C_CYAN_MSG    = (0, 255, 255)  # Cyan for Trainer Messages
+C_DIGITAL_GRN = (50, 205, 50)
+C_CYAN_MSG    = (0, 255, 255)
 C_BTN_FACE    = (230, 230, 230)
 C_BTN_SHADOW  = (100, 100, 100)
 C_HELD_BORDER = (255, 255, 0)
@@ -41,11 +41,13 @@ class SoundManager:
     def __init__(self):
         self.sounds = {}
         self.enabled = True
+        self.volume = 0.5 # Default Medium
         if os.path.exists(SOUND_DIR):
             self._load("bet", "bet.wav")
             self._load("deal", "deal.wav")
             self._load("win", "win.wav")
             self._load("rollup", "rollup.wav")
+        self.set_volume(self.volume) # Apply initial
 
     def _load(self, name, filename):
         try:
@@ -53,8 +55,13 @@ class SoundManager:
             self.sounds[name] = pygame.mixer.Sound(path)
         except: pass
 
+    def set_volume(self, vol):
+        self.volume = vol
+        for s in self.sounds.values():
+            s.set_volume(vol)
+
     def play(self, name):
-        if self.enabled and name in self.sounds:
+        if self.enabled and self.volume > 0 and name in self.sounds:
             self.sounds[name].play()
 
 # ==============================================================================
@@ -69,7 +76,7 @@ class AssetManager:
         self.font_grid = pygame.font.SysFont("Arial", 18, bold=True)
         self.font_vfd = pygame.font.SysFont("Impact", 32)
         self.font_lbl = pygame.font.SysFont("Arial", 14, bold=True)
-        self.font_msg = pygame.font.SysFont("Arial", 24, bold=True) # Larger font for advice
+        self.font_msg = pygame.font.SysFont("Arial", 24, bold=True)
         # Start loading images
         self._load_textures()
 
@@ -81,18 +88,17 @@ class AssetManager:
         count = 0
         for s in suits:
             for r in ranks:
-                key = r + s # e.g., "Th", "As", "2c"
+                key = r + s
                 path = os.path.join(ASSET_DIR, f"{key}.png")
                 if os.path.exists(path):
                     try:
                         img = pygame.image.load(path).convert_alpha()
-                        #Resize to game/display size
                         self.cards[key] = pygame.transform.smoothscale(img, CARD_SIZE)
                         count += 1
                     except Exception as e: print(f"Error loading {key}: {e}")
         print(f"Loaded {count} standard card images.")
 
-        # 2. Load Joker (Optional, strictly IGT Deuces Wild uses 52 cards)
+        # 2. Load Joker
         joker_path = os.path.join(ASSET_DIR, "joker.png")
         if os.path.exists(joker_path):
             try:
@@ -110,7 +116,6 @@ class AssetManager:
                 print("Loaded Card Back.")
             except Exception as e: print(f"Error loading back.png: {e}")
         else:
-            # Fallback placeholder if back.png is missing
             print("Warning: back.png not found. Using placeholder.")
             s = pygame.Surface(CARD_SIZE)
             s.fill((0, 50, 200))
@@ -152,7 +157,6 @@ class PhysicalButton:
         screen.blit(txt, txt_rect)
 
 class ClickableMeter:
-    """ A VFD meter that toggles between Credits and Cash when clicked. """
     def __init__(self, x_center, y_base, label, color, default_is_credits=True):
         self.x_center = x_center
         self.y_base = y_base
@@ -179,6 +183,47 @@ class ClickableMeter:
         screen.blit(lbl_surf, (self.x_center - lbl_surf.get_width()//2, self.y_base))
         screen.blit(val_surf, (self.x_center - val_surf.get_width()//2, self.y_base + 20))
 
+# --- VOLUME CONTROL BUTTON ---
+class VolumeButton:
+    def __init__(self, x, y, sound_manager):
+        self.rect = pygame.Rect(x, y, 40, 40)
+        self.sm = sound_manager
+        # States: 0=Mute, 1=Low(0.3), 2=Med(0.6), 3=High(1.0)
+        self.level = 2 
+        self.levels = [0.0, 0.3, 0.6, 1.0]
+        self.sm.set_volume(self.levels[self.level])
+
+    def check_click(self, pos):
+        if self.rect.collidepoint(pos):
+            self.level = (self.level + 1) % 4
+            self.sm.set_volume(self.levels[self.level])
+            if self.level > 0:
+                self.sm.play("bet") 
+            return True
+        return False
+
+    def draw(self, screen):
+        pygame.draw.rect(screen, (50, 50, 50), self.rect, border_radius=5)
+        pygame.draw.rect(screen, C_WHITE, self.rect, 2, border_radius=5)
+        
+        cx, cy = self.rect.centerx, self.rect.centery
+        poly_color = C_WHITE if self.level > 0 else (150, 150, 150)
+        p1 = (cx - 8, cy - 5)
+        p2 = (cx - 8, cy + 5)
+        p3 = (cx + 2, cy + 10)
+        p4 = (cx + 2, cy - 10)
+        pygame.draw.polygon(screen, poly_color, [p1, p2, p3, p4])
+        
+        if self.level >= 1: # Low
+            pygame.draw.arc(screen, poly_color, (cx-5, cy-6, 14, 12), -math.pi/2.5, math.pi/2.5, 2)
+        if self.level >= 2: # Med
+            pygame.draw.arc(screen, poly_color, (cx-5, cy-10, 18, 20), -math.pi/2.5, math.pi/2.5, 2)
+        if self.level >= 3: # High
+            pygame.draw.arc(screen, poly_color, (cx-5, cy-14, 22, 28), -math.pi/2.5, math.pi/2.5, 2)
+            
+        if self.level == 0:
+            pygame.draw.line(screen, C_DIGITAL_RED, (cx-10, cy-10), (cx+10, cy+10), 3)
+
 class CardSlot:
     def __init__(self, x, y, assets):
         self.rect = pygame.Rect(x, y, CARD_SIZE[0], CARD_SIZE[1])
@@ -188,21 +233,15 @@ class CardSlot:
         self.is_held = False
 
     def draw(self, screen):
-        # Default to back image
         img = self.assets.back
-        # If face up AND we have the loaded image for this card value
         if self.is_face_up and self.card_val in self.assets.cards:
             img = self.assets.cards[self.card_val]
         
         screen.blit(img, self.rect)
 
         if self.is_held and self.is_face_up:
-            # 1. No Border (Clean look)
-            # 2. Red Stamp FLOATING ABOVE CARD (y - 30)
             stamp_rect = pygame.Rect(self.rect.centerx - 40, self.rect.top - 30, 80, 26)
             pygame.draw.rect(screen, C_DIGITAL_RED, stamp_rect)
-            
-            # 3. Yellow Text
             lbl = self.assets.font_ui.render("HELD", True, C_YEL_TEXT)
             screen.blit(lbl, lbl.get_rect(center=stamp_rect.center))
 
@@ -228,10 +267,8 @@ class PaytableDisplay:
             "THREE_OAK"
         ]
         
-        # 2. Dynamic Filter: Only include rows that exist in the current variant's data
         self.rows = [key for key in master_order if key in pay_data]
         
-        # 3. Label Map (Human Readable)
         self.labels = {
             "NATURAL_ROYAL": "ROYAL FLUSH", 
             "FOUR_DEUCES_ACE": "4 DEUCES + A",
@@ -248,27 +285,20 @@ class PaytableDisplay:
         }
 
     def draw(self, screen, coins_bet, winning_rank=None):
-        # 1. Background (Bottom Layer)
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
         
-        # --- DYNAMIC ROW HEIGHT LOGIC ---
-        if len(self.rows) > 10:
-            row_h = 22
-        else:
-            row_h = 25
+        if len(self.rows) > 10: row_h = 22
+        else: row_h = 25
         
         col_w = (self.rect.width - 160) // 5
         active_x = self.rect.left + 160 + ((coins_bet - 1) * col_w)
         
-        # 2. Red Active Column (Draw BEFORE grid lines and border)
         pygame.draw.rect(screen, C_RED_ACTIVE, (active_x, self.rect.top, col_w, self.rect.height))
         
-        # 3. Vertical Grid Lines
         for i in range(5):
             x = self.rect.left + 160 + (i * col_w)
             pygame.draw.line(screen, C_YEL_TEXT, (x, self.rect.top), (x, self.rect.bottom), 2)
         
-        # 4. Text Content
         start_y = self.rect.top + 15
         for i, key in enumerate(self.rows):
             y = start_y + (i * row_h)
@@ -281,11 +311,9 @@ class PaytableDisplay:
                 val = base * c
                 if key == "NATURAL_ROYAL" and c == 5: val = 4000
                 x = self.rect.left + 160 + ((c-1) * col_w)
-                # Render numbers in YELLOW
                 val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
                 screen.blit(val_surf, (x + col_w - val_surf.get_width() - 10, y))
 
-        # 5. Outer Border (Top Layer - Ensures clean frame)
         pygame.draw.rect(screen, C_YEL_TEXT, self.rect, 2)
 
 # ==============================================================================
@@ -295,17 +323,14 @@ class IGT_Machine:
     def __init__(self):
         pygame.init()
         pygame.mixer.init()
-        # center window
         os.environ['SDL_VIDEO_CENTERED'] = '1'
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
         pygame.display.set_caption("EV Navigator - Deuces Wild Trainer")
         self.clock = pygame.time.Clock()
         
-        # Load assets first
         self.assets = AssetManager()
         self.sound = SoundManager()
         
-        # Initialize Engine
         self.available_variants = list(PAYTABLES.keys())
         self.variant_idx = 0 
         self.sim = dw_sim_engine.DeucesWildSim(variant=self.available_variants[self.variant_idx])
@@ -316,13 +341,19 @@ class IGT_Machine:
         for i in range(5):
             self.cards.append(CardSlot(132 + (i * 152), 340, self.assets))
             
-        # STATE VARIABLES
-        self.auto_hold_active = False # Toggle State
-        self.advice_msg = None        # "DRAW ALL" message
+        self.auto_hold_active = False 
+        self.auto_play_active = False 
+        self.last_action_time = 0     
+        self.advice_msg = None        
         
+        # --- STATS: Hand Counter ---
+        self.hands_played = 0
+
         self._init_buttons()
         self._init_meters()
         
+        self.vol_btn = VolumeButton(965, 705, self.sound)
+
         self.state = "IDLE"
         self.bankroll = 100.00
         self.coins_bet = 5
@@ -338,13 +369,14 @@ class IGT_Machine:
         y = 700; w, h = 90, 50
         self.buttons = [
             PhysicalButton((30, y, 120, h), "MORE GAMES", self.act_cycle_variant),
-            # BUTTON 1: AUTO HOLD TOGGLE
             PhysicalButton((160, y, w, h), "AUTO HOLD", self.act_toggle_auto_hold, color=C_DIGITAL_YEL),
+            PhysicalButton((270, y, 110, h), "AUTO PLAY", self.act_toggle_auto_play, color=C_BTN_FACE),
             PhysicalButton((400, y, w, h), "BET ONE", self.act_bet_one),
             PhysicalButton((500, y, w, h), "BET MAX", self.act_bet_max),
             PhysicalButton((800, y, 150, h), "DEAL", self.act_deal_draw, color=(255, 215, 0))
         ]
-        self.btn_auto = self.buttons[1] # Reference to update color/text
+        self.btn_auto_hold = self.buttons[1] 
+        self.btn_auto_play = self.buttons[2]
         self.btn_deal = self.buttons[-1]
 
     def _init_meters(self):
@@ -353,27 +385,30 @@ class IGT_Machine:
         self.meter_credit = ClickableMeter(900, 630, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
         self.meters = [self.meter_win, self.meter_bet, self.meter_credit]
 
-    # --- FEATURE 1: AUTO HOLD TOGGLE ---
     def act_toggle_auto_hold(self):
-        """ Switches Auto-Hold mode ON/OFF and updates visual state. """
         self.auto_hold_active = not self.auto_hold_active
-        
         if self.auto_hold_active:
-            self.btn_auto.text = "AUTO: ON"
-            self.btn_auto.color = C_DIGITAL_GRN # Bright Green
-            # If we are in the middle of a hand, run it now!
+            self.btn_auto_hold.text = "AUTO: ON"
+            self.btn_auto_hold.color = C_DIGITAL_GRN 
             if self.state == "DECISION":
                 self.run_solver()
         else:
-            self.btn_auto.text = "AUTO HOLD"
-            self.btn_auto.color = C_DIGITAL_YEL # Standard Yellow
+            self.btn_auto_hold.text = "AUTO HOLD"
+            self.btn_auto_hold.color = C_DIGITAL_YEL 
             self.advice_msg = None
 
-    # --- FEATURE 2: FAST SOLVER LOGIC ---
+    def act_toggle_auto_play(self):
+        self.auto_play_active = not self.auto_play_active
+        if self.auto_play_active:
+            self.btn_auto_play.text = "STOP"
+            self.btn_auto_play.color = C_DIGITAL_RED
+            self.last_action_time = pygame.time.get_ticks()
+        else:
+            self.btn_auto_play.text = "AUTO PLAY"
+            self.btn_auto_play.color = C_BTN_FACE
+
     def run_solver(self):
-        """ Runs the fast solver and updates the UI. """
         best_cards = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
-        
         self.held_indices = []
         for i, card in enumerate(self.hand):
             if card in best_cards:
@@ -382,12 +417,10 @@ class IGT_Machine:
             else:
                 self.cards[i].is_held = False
         
-        # FEEDBACK: If best play is "Draw All" (hold nothing), show message
         if not best_cards:
             self.advice_msg = "ADVICE: DRAW ALL"
         else:
-            self.advice_msg = None # Clear message if we held something
-            
+            self.advice_msg = None 
         self.sound.play("bet")
 
     def act_cycle_variant(self):
@@ -414,7 +447,6 @@ class IGT_Machine:
 
     def act_deal_draw(self):
         if self.state == "IDLE":
-            # --- DEAL PHASE ---
             cost = self.coins_bet * self.denom
             if self.bankroll < cost: return
             self.bankroll -= cost
@@ -422,9 +454,13 @@ class IGT_Machine:
             self.win_display = 0.0
             self.win_target = 0.0
             self.last_win_rank = None
-            self.advice_msg = None # Clear old advice
+            self.advice_msg = None 
             
             self.hand, self.stub = self.core.deal_hand()
+            
+            # --- COUNTER UPDATE ---
+            self.hands_played += 1
+            
             self.held_indices = []
             
             for i, c in enumerate(self.hand):
@@ -432,7 +468,6 @@ class IGT_Machine:
                 self.cards[i].is_face_up = True
                 self.cards[i].is_held = False
             
-            # Pre-Draw Evaluation
             rank, mult = self.sim.evaluate_hand_score(self.hand)
             if mult > 0: self.last_win_rank = rank
             else: self.last_win_rank = None
@@ -441,14 +476,11 @@ class IGT_Machine:
             self.state = "DECISION"
             self.btn_deal.text = "DRAW"
             
-            # --- AUTO HOLD TRIGGER ---
-            # If enabled, run immediately after deal
-            if self.auto_hold_active:
+            if self.auto_hold_active or self.auto_play_active:
                 self.run_solver()
             
         elif self.state == "DECISION":
-            # --- DRAW PHASE ---
-            self.advice_msg = None # Hide advice during draw animation
+            self.advice_msg = None
             self.core.shuffle(self.stub)
             
             for i in range(5):
@@ -459,7 +491,6 @@ class IGT_Machine:
             
             for i, c in enumerate(self.hand):
                 self.cards[i].card_val = c
-                # Keep HELD markers visible (removed reset)
             
             self.sound.play("deal")
             
@@ -478,6 +509,9 @@ class IGT_Machine:
             self.btn_deal.text = "DEAL"
 
     def handle_click(self, pos):
+        if self.vol_btn.check_click(pos):
+            return
+
         for m in self.meters:
             if m.check_click(pos):
                 self.sound.play("bet")
@@ -486,11 +520,20 @@ class IGT_Machine:
         if self.state == "DECISION":
             for i, slot in enumerate(self.cards):
                 if slot.rect.collidepoint(pos):
-                    # If user clicks manually, clear "Draw All" message to reduce clutter
                     self.advice_msg = None
                     slot.is_held = not slot.is_held
                     if slot.is_held: self.held_indices.append(i)
                     else: self.held_indices.remove(i)
+
+    def update_auto_play(self):
+        if not self.auto_play_active: return
+        now = pygame.time.get_ticks()
+        if now - self.last_action_time > 400:
+            self.last_action_time = now
+            if self.state == "IDLE":
+                self.act_deal_draw()
+            elif self.state == "DECISION":
+                self.act_deal_draw()
 
     def draw_variant_label(self):
         label_text = f"Deuces Wild ({self.sim.variant})"
@@ -518,16 +561,24 @@ class IGT_Machine:
         pygame.draw.line(self.screen, C_WHITE, (0, 310), (SCREEN_W, 310), 2)
         pygame.draw.line(self.screen, C_WHITE, (0, 620), (SCREEN_W, 620), 2)
         
-        # --- NEW: TRAINER MESSAGE OVERLAY ---
+        # Draw Volume Icon
+        self.vol_btn.draw(self.screen)
+
         if self.advice_msg:
-            # Draw above cards (y=315)
             msg_surf = self.assets.font_msg.render(self.advice_msg, True, C_CYAN_MSG)
             msg_rect = msg_surf.get_rect(center=(SCREEN_W // 2, 325))
-            # Add a subtle shadow box for readability
             bg_rect = msg_rect.inflate(20, 10)
             pygame.draw.rect(self.screen, (0,0,50), bg_rect, border_radius=5)
             pygame.draw.rect(self.screen, C_CYAN_MSG, bg_rect, 2, border_radius=5)
             self.screen.blit(msg_surf, msg_rect)
+            
+        if self.auto_play_active:
+            pilot_surf = self.assets.font_ui.render("PILOT ENGAGED", True, C_DIGITAL_GRN)
+            self.screen.blit(pilot_surf, (300, 750))
+            
+        # --- NEW: DEALS COUNTER ---
+        deals_surf = self.assets.font_lbl.render(f"DEALS: {self.hands_played}", True, C_YEL_TEXT)
+        self.screen.blit(deals_surf, (30, 680)) # Bottom Left placement
 
         for c in self.cards: c.draw(self.screen)
         
@@ -553,11 +604,13 @@ class IGT_Machine:
     def run(self):
         running = True
         while running:
+            self.update_auto_play()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: running = False
                 elif event.type == pygame.MOUSEBUTTONUP: self.handle_click(event.pos)
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_a: self.act_toggle_auto_hold()
+                    elif event.key == pygame.K_p: self.act_toggle_auto_play()
                     elif event.key == pygame.K_SPACE: self.act_deal_draw()
 
             self.draw()
