@@ -1,18 +1,18 @@
 import pygame
 import os
 import sys
-import math # Needed for drawing arcs
+import math
 # Ensure dw_sim_engine.py is in the same directory or python path
 import dw_sim_engine
-# Import the Fast Solver for Instant Auto-Hold
-import dw_fast_solver 
+# Import solvers
+import dw_fast_solver
+import dw_exact_solver 
 from dw_pay_constants import PAYTABLES
 
 # ==============================================================================
 # ⚙️ CONFIGURATION & CONSTANTS
 # ==============================================================================
-# UPDATED: Increased height to 850 to fix UI overlapping
-SCREEN_W, SCREEN_H = 1024, 850 
+SCREEN_W, SCREEN_H = 1400, 850 
 FPS = 60
 
 # COLORS
@@ -29,10 +29,17 @@ C_BTN_FACE    = (230, 230, 230)
 C_BTN_SHADOW  = (100, 100, 100)
 C_HELD_BORDER = (255, 255, 0)
 
+# --- NOTEBOOK THEME ---
+C_NB_BG       = (255, 255, 255)  # Paper White
+C_NB_TEXT     = (20, 20, 20)     # Ink Black
+C_NB_RED      = (200, 0, 0)      # Standard Red Ink
+C_NB_BLACK    = (0, 0, 0)        # Standard Black Ink
+C_NB_HIGHLIGHT= (255, 230, 80)   # High-vis Yellow
+C_NB_LINES    = (200, 200, 200)  # Faint rule lines
+
 # Path to card images relative to this script
 ASSET_DIR = os.path.join("images", "cards")
 SOUND_DIR = "sounds"
-# Final display size for cards in the game window
 CARD_SIZE = (142, 215)
 
 # ==============================================================================
@@ -42,13 +49,13 @@ class SoundManager:
     def __init__(self):
         self.sounds = {}
         self.enabled = True
-        self.volume = 0.5 # Default Medium
+        self.volume = 0.5 
         if os.path.exists(SOUND_DIR):
             self._load("bet", "bet.wav")
             self._load("deal", "deal.wav")
             self._load("win", "win.wav")
             self._load("rollup", "rollup.wav")
-        self.set_volume(self.volume) # Apply initial
+        self.set_volume(self.volume)
 
     def _load(self, name, filename):
         try:
@@ -72,19 +79,21 @@ class AssetManager:
     def __init__(self):
         self.cards = {}
         self.back = None
-        # Initialize fonts needed for UI
+        # Fonts
         self.font_ui = pygame.font.SysFont("Arial", 16, bold=True)
         self.font_grid = pygame.font.SysFont("Arial", 18, bold=True)
         self.font_vfd = pygame.font.SysFont("Impact", 32)
         self.font_lbl = pygame.font.SysFont("Arial", 14, bold=True)
         self.font_msg = pygame.font.SysFont("Arial", 24, bold=True)
-        # Start loading images
+        
+        # Log Fonts
+        self.font_log_bold = pygame.font.SysFont("Segoe UI Symbol", 16, bold=True)
+        self.font_log = pygame.font.SysFont("Segoe UI Symbol", 16)
+        
         self._load_textures()
 
     def _load_textures(self):
         print(f"Loading assets from: {os.path.abspath(ASSET_DIR)}")
-        
-        # 1. Load Standard 52 Cards
         ranks = "23456789TJQKA"; suits = "shdc"
         count = 0
         for s in suits:
@@ -99,32 +108,204 @@ class AssetManager:
                     except Exception as e: print(f"Error loading {key}: {e}")
         print(f"Loaded {count} standard card images.")
 
-        # 2. Load Joker
         joker_path = os.path.join(ASSET_DIR, "joker.png")
         if os.path.exists(joker_path):
             try:
                 img = pygame.image.load(joker_path).convert_alpha()
                 self.cards['JOKER'] = pygame.transform.smoothscale(img, CARD_SIZE)
-                print("Loaded Joker image.")
-            except Exception as e: print(f"Error loading Joker: {e}")
+            except: pass
 
-        # 3. Load Card Back
         back_path = os.path.join(ASSET_DIR, "back.png")
         if os.path.exists(back_path):
             try:
                 img = pygame.image.load(back_path).convert_alpha()
                 self.back = pygame.transform.smoothscale(img, CARD_SIZE)
-                print("Loaded Card Back.")
-            except Exception as e: print(f"Error loading back.png: {e}")
+            except: pass
         else:
-            print("Warning: back.png not found. Using placeholder.")
             s = pygame.Surface(CARD_SIZE)
             s.fill((0, 50, 200))
             pygame.draw.rect(s, C_WHITE, (5,5,130,200), 2)
             self.back = s
 
 # ==============================================================================
-# 🧩 UI COMPONENTS
+# 📜 LOG PANEL (NOTEBOOK EDITION - INTERACTIVE SCROLL)
+# ==============================================================================
+class LogPanel:
+    def __init__(self, x, y, w, h, assets):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.assets = assets
+        self.logs = [] 
+        self.scroll_y = 0 
+        self.entry_height = 110
+        self.content_height = 0
+        self.header_h = 40
+        
+        # Scroll Interaction State
+        self.is_dragging = False
+        self.drag_start_y = 0
+        self.scroll_start_y = 0
+        self.thumb_rect = pygame.Rect(0,0,0,0) 
+
+    def add_entry(self, hand_num, deal_cards, final_cards, held_indices, ev_data, result_data):
+        entry = {
+            'id': hand_num,
+            'deal': deal_cards,
+            'final': final_cards,
+            'held_idx': held_indices,
+            'ev': ev_data,
+            'result': result_data
+        }
+        self.logs.insert(0, entry)
+        self.content_height = len(self.logs) * self.entry_height
+
+    def handle_event(self, event):
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # 1. Mouse Wheel
+        if event.type == pygame.MOUSEWHEEL:
+            if self.rect.collidepoint(mouse_pos):
+                self.scroll_y -= event.y * 20
+                self._clamp_scroll()
+
+        # 2. Start Drag
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1: # Left Click
+                if self.thumb_rect.collidepoint(mouse_pos):
+                    self.is_dragging = True
+                    self.drag_start_y = mouse_pos[1]
+                    self.scroll_start_y = self.scroll_y
+
+        # 3. Stop Drag
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                self.is_dragging = False
+
+        # 4. Dragging Motion
+        elif event.type == pygame.MOUSEMOTION:
+            if self.is_dragging:
+                delta_y = mouse_pos[1] - self.drag_start_y
+                view_h = self.rect.height - self.header_h
+                track_h = view_h 
+                if self.content_height > view_h and track_h > 0:
+                    ratio = self.content_height / track_h
+                    self.scroll_y = self.scroll_start_y + (delta_y * ratio)
+                    self._clamp_scroll()
+
+    def _clamp_scroll(self):
+        view_h = self.rect.height - self.header_h
+        max_scroll = max(0, self.content_height - view_h)
+        if self.scroll_y < 0: self.scroll_y = 0
+        if self.scroll_y > max_scroll: self.scroll_y = max_scroll
+
+    def draw_cards_text(self, screen, cards, x, y, highlights=None):
+        suit_map = {'s': '♠', 'c': '♣', 'h': '♥', 'd': '♦'}
+        font = self.assets.font_log_bold
+        char_w = 35 
+        
+        for i, card in enumerate(cards):
+            current_x = x + (i * char_w)
+            
+            # 1. Draw Highlighter
+            if highlights and i in highlights:
+                bg_rect = pygame.Rect(current_x - 2, y, char_w - 2, 20)
+                pygame.draw.rect(screen, C_NB_HIGHLIGHT, bg_rect)
+
+            # 2. Determine Color
+            rank = card[0]
+            suit_char = card[1]
+            symbol = suit_map.get(suit_char, suit_char)
+            color = C_NB_RED if suit_char in 'hd' else C_NB_BLACK
+            
+            # 3. Draw Text
+            txt = font.render(f"{rank}{symbol}", True, color)
+            screen.blit(txt, (current_x, y))
+
+    def draw(self, screen):
+        # 1. Background
+        pygame.draw.rect(screen, C_NB_BG, self.rect)
+        pygame.draw.rect(screen, C_NB_TEXT, self.rect, 2)
+        
+        # 2. Header
+        pygame.draw.rect(screen, (240, 240, 240), (self.rect.left, self.rect.top, self.rect.width, self.header_h))
+        pygame.draw.line(screen, C_NB_TEXT, (self.rect.left, self.rect.top + self.header_h), (self.rect.right, self.rect.top + self.header_h), 2)
+        
+        title = self.assets.font_ui.render("LABORATORY NOTEBOOK", True, C_NB_TEXT)
+        screen.blit(title, (self.rect.centerx - title.get_width()//2, self.rect.top + 10))
+        
+        # 3. Clipping Area
+        clip_rect = pygame.Rect(self.rect.left, self.rect.top + self.header_h, self.rect.width, self.rect.height - self.header_h)
+        original_clip = screen.get_clip()
+        screen.set_clip(clip_rect)
+        
+        start_y = (self.rect.top + self.header_h + 10) - self.scroll_y
+        
+        for i, log in enumerate(self.logs):
+            y = start_y + (i * self.entry_height)
+            
+            # Optimize drawing
+            if y + self.entry_height < self.rect.top or y > self.rect.bottom:
+                continue
+            
+            # Rule Line
+            pygame.draw.line(screen, C_NB_LINES, (self.rect.left + 10, y + self.entry_height - 10), (self.rect.right - 20, y + self.entry_height - 10))
+            
+            # Line 1: ID + Result
+            id_txt = self.assets.font_log_bold.render(f"#{log['id']}", True, (100, 100, 100))
+            screen.blit(id_txt, (self.rect.left + 15, y))
+            
+            win_amt = log['result']['win']
+            if win_amt > 0:
+                win_str = f"WIN: ${win_amt:.2f} ({log['result']['rank']})"
+                win_col = (0, 150, 0)
+            else:
+                win_str = "Result: Loss"
+                win_col = (150, 150, 150)
+            
+            win_txt = self.assets.font_log_bold.render(win_str, True, win_col)
+            screen.blit(win_txt, (self.rect.left + 70, y))
+            
+            # Line 2: Deal (Highlighted)
+            lbl_deal = self.assets.font_log.render("Deal:", True, C_NB_TEXT)
+            screen.blit(lbl_deal, (self.rect.left + 15, y + 25))
+            self.draw_cards_text(screen, log['deal'], self.rect.left + 70, y + 25, highlights=log['held_idx'])
+            
+            # Line 3: Final (Highlighted!)
+            lbl_fin = self.assets.font_log.render("Final:", True, C_NB_TEXT)
+            screen.blit(lbl_fin, (self.rect.left + 15, y + 50))
+            self.draw_cards_text(screen, log['final'], self.rect.left + 70, y + 50, highlights=log['held_idx'])
+            
+            # Line 4: EV Decision
+            user_ev = log['ev']['user']
+            max_ev = log['ev']['max']
+            diff = max_ev - user_ev
+            
+            if diff < 0.025: # Slightly more tolerance for rounding (0.025 = 1/40th of a credit)
+                dec_txt = self.assets.font_log_bold.render(f"✅ Optimal (EV: {max_ev:.4f})", True, (0, 120, 0))
+            else:
+                dec_txt = self.assets.font_log_bold.render(f"❌ Error: -{diff:.4f} EV (Max: {max_ev:.4f})", True, C_NB_RED)
+                
+            screen.blit(dec_txt, (self.rect.left + 15, y + 75))
+
+        screen.set_clip(original_clip)
+        
+        # 4. Scrollbar Logic
+        if self.content_height > clip_rect.height:
+            bar_h = clip_rect.height
+            thumb_h = max(30, (clip_rect.height / self.content_height) * bar_h)
+            scroll_percent = self.scroll_y / (self.content_height - clip_rect.height) if (self.content_height - clip_rect.height) > 0 else 0
+            available_track = bar_h - thumb_h
+            thumb_y = clip_rect.top + (scroll_percent * available_track)
+            
+            self.thumb_rect = pygame.Rect(self.rect.right - 14, thumb_y, 12, thumb_h)
+            
+            pygame.draw.rect(screen, (230, 230, 230), (self.rect.right - 14, clip_rect.top, 12, bar_h))
+            thumb_col = (150, 150, 150) if not self.is_dragging else (100, 100, 100)
+            pygame.draw.rect(screen, thumb_col, self.thumb_rect, border_radius=4)
+        else:
+            self.thumb_rect = pygame.Rect(0,0,0,0)
+
+# ==============================================================================
+# 🧩 UI COMPONENTS (Existing)
 # ==============================================================================
 class PhysicalButton:
     def __init__(self, rect, text, callback, color=C_BTN_FACE):
@@ -184,12 +365,10 @@ class ClickableMeter:
         screen.blit(lbl_surf, (self.x_center - lbl_surf.get_width()//2, self.y_base))
         screen.blit(val_surf, (self.x_center - val_surf.get_width()//2, self.y_base + 20))
 
-# --- VOLUME CONTROL BUTTON ---
 class VolumeButton:
     def __init__(self, x, y, sound_manager):
         self.rect = pygame.Rect(x, y, 40, 40)
         self.sm = sound_manager
-        # States: 0=Mute, 1=Low(0.3), 2=Med(0.6), 3=High(1.0)
         self.level = 2 
         self.levels = [0.0, 0.3, 0.6, 1.0]
         self.sm.set_volume(self.levels[self.level])
@@ -209,21 +388,14 @@ class VolumeButton:
         
         cx, cy = self.rect.centerx, self.rect.centery
         poly_color = C_WHITE if self.level > 0 else (150, 150, 150)
-        p1 = (cx - 8, cy - 5)
-        p2 = (cx - 8, cy + 5)
-        p3 = (cx + 2, cy + 10)
-        p4 = (cx + 2, cy - 10)
+        p1 = (cx - 8, cy - 5); p2 = (cx - 8, cy + 5)
+        p3 = (cx + 2, cy + 10); p4 = (cx + 2, cy - 10)
         pygame.draw.polygon(screen, poly_color, [p1, p2, p3, p4])
         
-        if self.level >= 1: # Low
-            pygame.draw.arc(screen, poly_color, (cx-5, cy-6, 14, 12), -math.pi/2.5, math.pi/2.5, 2)
-        if self.level >= 2: # Med
-            pygame.draw.arc(screen, poly_color, (cx-5, cy-10, 18, 20), -math.pi/2.5, math.pi/2.5, 2)
-        if self.level >= 3: # High
-            pygame.draw.arc(screen, poly_color, (cx-5, cy-14, 22, 28), -math.pi/2.5, math.pi/2.5, 2)
-            
-        if self.level == 0:
-            pygame.draw.line(screen, C_DIGITAL_RED, (cx-10, cy-10), (cx+10, cy+10), 3)
+        if self.level >= 1: pygame.draw.arc(screen, poly_color, (cx-5, cy-6, 14, 12), -math.pi/2.5, math.pi/2.5, 2)
+        if self.level >= 2: pygame.draw.arc(screen, poly_color, (cx-5, cy-10, 18, 20), -math.pi/2.5, math.pi/2.5, 2)
+        if self.level >= 3: pygame.draw.arc(screen, poly_color, (cx-5, cy-14, 22, 28), -math.pi/2.5, math.pi/2.5, 2)
+        if self.level == 0: pygame.draw.line(screen, C_DIGITAL_RED, (cx-10, cy-10), (cx+10, cy+10), 3)
 
 class CardSlot:
     def __init__(self, x, y, assets):
@@ -248,54 +420,23 @@ class CardSlot:
 
 class PaytableDisplay:
     def __init__(self, assets, pay_data):
-        # PAYTABLE HEIGHT: 360px
         self.rect = pygame.Rect(30, 20, 964, 360)
         self.assets = assets
         self.data = pay_data
         
-        # 1. Master List of all possible display rows in Rank Order
-        master_order = [
-            "NATURAL_ROYAL", 
-            "FOUR_DEUCES_ACE", 
-            "FOUR_DEUCES", 
-            "FIVE_ACES", 
-            "FIVE_3_4_5",
-            "FIVE_6_TO_K",
-            "WILD_ROYAL", 
-            "FIVE_OAK", 
-            "STRAIGHT_FLUSH", 
-            "FOUR_OAK", 
-            "FULL_HOUSE", 
-            "FLUSH", 
-            "STRAIGHT", 
-            "THREE_OAK"
-        ]
-        
+        master_order = ["NATURAL_ROYAL", "FOUR_DEUCES_ACE", "FOUR_DEUCES", "FIVE_ACES", "FIVE_3_4_5", "FIVE_6_TO_K", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]
         self.rows = [key for key in master_order if key in pay_data]
-        
         self.labels = {
-            "NATURAL_ROYAL": "ROYAL FLUSH", 
-            "FOUR_DEUCES_ACE": "4 DEUCES + A",
-            "FOUR_DEUCES": "4 DEUCES", 
-            "FIVE_ACES": "5 ACES",
-            "FIVE_3_4_5": "5 3s 4s 5s",
-            "FIVE_6_TO_K": "5 6s THRU Ks",
-            "WILD_ROYAL": "WILD ROYAL", 
-            "FIVE_OAK": "5 OF A KIND", 
-            "STRAIGHT_FLUSH": "STR FLUSH", 
-            "FOUR_OAK": "4 OF A KIND", 
-            "FULL_HOUSE": "FULL HOUSE", 
-            "FLUSH": "FLUSH", 
-            "STRAIGHT": "STRAIGHT", 
-            "THREE_OAK": "3 OF A KIND"
+            "NATURAL_ROYAL": "ROYAL FLUSH", "FOUR_DEUCES_ACE": "4 DEUCES + A", "FOUR_DEUCES": "4 DEUCES", 
+            "FIVE_ACES": "5 ACES", "FIVE_3_4_5": "5 3s 4s 5s", "FIVE_6_TO_K": "5 6s THRU Ks",
+            "WILD_ROYAL": "WILD ROYAL", "FIVE_OAK": "5 OF A KIND", "STRAIGHT_FLUSH": "STR FLUSH", 
+            "FOUR_OAK": "4 OF A KIND", "FULL_HOUSE": "FULL HOUSE", "FLUSH": "FLUSH", 
+            "STRAIGHT": "STRAIGHT", "THREE_OAK": "3 OF A KIND"
         }
 
     def draw(self, screen, coins_bet, winning_rank=None):
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
-        
-        # Fixed 25px row height for spacing
         row_h = 25
-        
         col_w = (self.rect.width - 160) // 5
         active_x = self.rect.left + 160 + ((coins_bet - 1) * col_w)
         
@@ -331,7 +472,7 @@ class IGT_Machine:
         pygame.mixer.init()
         os.environ['SDL_VIDEO_CENTERED'] = '1'
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer")
+        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer (Extended)")
         self.clock = pygame.time.Clock()
         
         self.assets = AssetManager()
@@ -343,9 +484,11 @@ class IGT_Machine:
         self.core = self.sim.core
         
         self.paytable = PaytableDisplay(self.assets, self.sim.paytable)
-        self.cards = []
         
-        # UPDATED: Card Y position (410)
+        # Initialize Log Panel (Right Side)
+        self.log_panel = LogPanel(1034, 20, 350, 810, self.assets)
+        
+        self.cards = []
         for i in range(5):
             self.cards.append(CardSlot(132 + (i * 152), 410, self.assets))
             
@@ -354,13 +497,9 @@ class IGT_Machine:
         self.last_action_time = 0     
         self.advice_msg = None        
         
-        # --- STATS: Hand Counter ---
         self.hands_played = 0
-
         self._init_buttons()
         self._init_meters()
-        
-        # UPDATED: Volume Button Y position (785)
         self.vol_btn = VolumeButton(965, 785, self.sound)
 
         self.state = "IDLE"
@@ -373,9 +512,10 @@ class IGT_Machine:
         self.hand = []
         self.stub = []
         self.held_indices = []
+        # Store deal snapshot for log
+        self.deal_snapshot = []
 
     def _init_buttons(self):
-        # UPDATED: Buttons moved down to Y=780 to clear labels
         y = 780; w, h = 90, 50
         self.buttons = [
             PhysicalButton((30, y, 120, h), "MORE GAMES", self.act_cycle_variant),
@@ -390,7 +530,6 @@ class IGT_Machine:
         self.btn_deal = self.buttons[-1]
 
     def _init_meters(self):
-        # Meters kept at Y=680
         self.meter_win = ClickableMeter(100, 680, "WIN", C_DIGITAL_RED, default_is_credits=True)
         self.meter_bet = ClickableMeter(500, 680, "BET", C_DIGITAL_YEL, default_is_credits=True)
         self.meter_credit = ClickableMeter(900, 680, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
@@ -419,7 +558,6 @@ class IGT_Machine:
             self.btn_auto_play.color = C_BTN_FACE
 
     def run_solver(self):
-        # Unpack tuple (best_cards, ev) from solver
         best_cards, _ = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
         self.held_indices = []
         for i, card in enumerate(self.hand):
@@ -439,7 +577,6 @@ class IGT_Machine:
         if self.state != "IDLE": return 
         self.variant_idx = (self.variant_idx + 1) % len(self.available_variants)
         new_variant = self.available_variants[self.variant_idx]
-        print(f"Switching to {new_variant}...")
         self.sim = dw_sim_engine.DeucesWildSim(variant=new_variant)
         self.core = self.sim.core
         self.paytable = PaytableDisplay(self.assets, self.sim.paytable)
@@ -469,10 +606,8 @@ class IGT_Machine:
             self.advice_msg = None 
             
             self.hand, self.stub = self.core.deal_hand()
-            
-            # --- COUNTER UPDATE ---
+            self.deal_snapshot = list(self.hand) # Keep copy for log
             self.hands_played += 1
-            
             self.held_indices = []
             
             for i, c in enumerate(self.hand):
@@ -493,8 +628,26 @@ class IGT_Machine:
             
         elif self.state == "DECISION":
             self.advice_msg = None
-            self.core.shuffle(self.stub)
             
+            # --- PERFORMANCE OPTIMIZATION: USE FAST SOLVER ---
+            optimal_hold, max_ev = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+            
+            user_hold_cards = [self.hand[i] for i in self.held_indices]
+            
+            if set(user_hold_cards) == set(optimal_hold):
+                user_ev = max_ev # Perfect play!
+            else:
+                user_ev = dw_exact_solver.calculate_exact_ev(self.hand, self.held_indices, self.sim.paytable)
+            
+            # --- FIX: SCALE EV TO MAX BET ---
+            max_ev_disp = max_ev * self.coins_bet
+            user_ev_disp = user_ev * self.coins_bet
+            
+            # Record current held indices for the log BEFORE replacing cards
+            logged_held_indices = list(self.held_indices)
+
+            # 3. Process Draw
+            self.core.shuffle(self.stub)
             for i in range(5):
                 if i not in self.held_indices:
                     if self.stub:
@@ -516,6 +669,16 @@ class IGT_Machine:
                 self.bankroll += win_val
             else:
                 self.last_win_rank = None
+                
+            # --- LOG IT (With Scaled EV) ---
+            self.log_panel.add_entry(
+                self.hands_played,
+                self.deal_snapshot,
+                list(self.hand),
+                logged_held_indices,
+                {'user': user_ev_disp, 'max': max_ev_disp},
+                {'win': win_val, 'rank': rank.replace('_',' ')}
+            )
             
             self.state = "IDLE"
             self.btn_deal.text = "DEAL"
@@ -550,13 +713,11 @@ class IGT_Machine:
     def draw_variant_label(self):
         label_text = f"Deuces Wild ({self.sim.variant})"
         text_surf = self.assets.font_ui.render(label_text, True, C_WHITE)
-        # UPDATED: Moved to bottom left Y=835
         self.screen.blit(text_surf, (20, 835))
 
     def draw_denom_badge(self):
         cents = int(self.denom * 100)
         text = f"{cents}¢"
-        # UPDATED: Aligned with buttons at Y=805
         center_x, center_y = 730, 805
         radius_x, radius_y = 40, 25
         rect = pygame.Rect(center_x - radius_x, center_y - radius_y, radius_x * 2, radius_y * 2)
@@ -570,19 +731,17 @@ class IGT_Machine:
     def draw(self):
         self.screen.fill(C_BLACK)
         self.paytable.draw(self.screen, self.coins_bet, self.last_win_rank)
+        self.log_panel.draw(self.screen) # Draw Log
         
-        # UPDATED: Blue background area
-        pygame.draw.rect(self.screen, C_BG_BLUE, (0, 380, SCREEN_W, 280))
-        pygame.draw.line(self.screen, C_WHITE, (0, 380), (SCREEN_W, 380), 2)
-        pygame.draw.line(self.screen, C_WHITE, (0, 660), (SCREEN_W, 660), 2)
+        pygame.draw.rect(self.screen, C_BG_BLUE, (0, 380, 1024, 280)) # Adjusted width for blue area
+        pygame.draw.line(self.screen, C_WHITE, (0, 380), (1024, 380), 2)
+        pygame.draw.line(self.screen, C_WHITE, (0, 660), (1024, 660), 2)
         
-        # Draw Volume Icon
         self.vol_btn.draw(self.screen)
 
         if self.advice_msg:
             msg_surf = self.assets.font_msg.render(self.advice_msg, True, C_CYAN_MSG)
-            # UPDATED: Centered in gap between Paytable and Cards
-            msg_rect = msg_surf.get_rect(center=(SCREEN_W // 2, 395))
+            msg_rect = msg_surf.get_rect(center=(512, 395)) # Centered relative to game area
             bg_rect = msg_rect.inflate(20, 10)
             pygame.draw.rect(self.screen, (0,0,50), bg_rect, border_radius=5)
             pygame.draw.rect(self.screen, C_CYAN_MSG, bg_rect, 2, border_radius=5)
@@ -590,12 +749,9 @@ class IGT_Machine:
             
         if self.auto_play_active:
             pilot_surf = self.assets.font_ui.render("PILOT ENGAGED", True, C_DIGITAL_GRN)
-            # UPDATED: Moved to bottom Y=835
             self.screen.blit(pilot_surf, (300, 835))
             
-        # --- NEW: DEALS COUNTER ---
         deals_surf = self.assets.font_lbl.render(f"DEALS: {self.hands_played}", True, C_YEL_TEXT)
-        # UPDATED: Moved above buttons to Y=750
         self.screen.blit(deals_surf, (30, 750)) 
 
         for c in self.cards: c.draw(self.screen)
@@ -625,7 +781,13 @@ class IGT_Machine:
             self.update_auto_play()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: running = False
-                elif event.type == pygame.MOUSEBUTTONUP: self.handle_click(event.pos)
+                elif event.type == pygame.MOUSEBUTTONUP: 
+                    # Handle all mouse click interactions (buttons + scrollbar drag start)
+                    self.handle_click(event.pos)
+                    self.log_panel.handle_event(event)
+                elif event.type in [pygame.MOUSEWHEEL, pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN]:
+                    # Pass other events to log panel for scrolling/dragging
+                    self.log_panel.handle_event(event)
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_a: self.act_toggle_auto_hold()
                     elif event.key == pygame.K_p: self.act_toggle_auto_play()
