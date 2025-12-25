@@ -11,7 +11,8 @@ from dw_pay_constants import PAYTABLES
 # ==============================================================================
 # ⚙️ CONFIGURATION & CONSTANTS
 # ==============================================================================
-SCREEN_W, SCREEN_H = 1024, 768 
+# UPDATED: Increased height to 850 to fix UI overlapping
+SCREEN_W, SCREEN_H = 1024, 850 
 FPS = 60
 
 # COLORS
@@ -247,9 +248,10 @@ class CardSlot:
 
 class PaytableDisplay:
     def __init__(self, assets, pay_data):
+        # PAYTABLE HEIGHT: 360px
+        self.rect = pygame.Rect(30, 20, 964, 360)
         self.assets = assets
         self.data = pay_data
-        self.rect = pygame.Rect(30, 20, 964, 280)
         
         # 1. Master List of all possible display rows in Rank Order
         master_order = [
@@ -257,6 +259,8 @@ class PaytableDisplay:
             "FOUR_DEUCES_ACE", 
             "FOUR_DEUCES", 
             "FIVE_ACES", 
+            "FIVE_3_4_5",
+            "FIVE_6_TO_K",
             "WILD_ROYAL", 
             "FIVE_OAK", 
             "STRAIGHT_FLUSH", 
@@ -274,6 +278,8 @@ class PaytableDisplay:
             "FOUR_DEUCES_ACE": "4 DEUCES + A",
             "FOUR_DEUCES": "4 DEUCES", 
             "FIVE_ACES": "5 ACES",
+            "FIVE_3_4_5": "5 3s 4s 5s",
+            "FIVE_6_TO_K": "5 6s THRU Ks",
             "WILD_ROYAL": "WILD ROYAL", 
             "FIVE_OAK": "5 OF A KIND", 
             "STRAIGHT_FLUSH": "STR FLUSH", 
@@ -287,8 +293,8 @@ class PaytableDisplay:
     def draw(self, screen, coins_bet, winning_rank=None):
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
         
-        if len(self.rows) > 10: row_h = 22
-        else: row_h = 25
+        # Fixed 25px row height for spacing
+        row_h = 25
         
         col_w = (self.rect.width - 160) // 5
         active_x = self.rect.left + 160 + ((coins_bet - 1) * col_w)
@@ -338,8 +344,10 @@ class IGT_Machine:
         
         self.paytable = PaytableDisplay(self.assets, self.sim.paytable)
         self.cards = []
+        
+        # UPDATED: Card Y position (410)
         for i in range(5):
-            self.cards.append(CardSlot(132 + (i * 152), 340, self.assets))
+            self.cards.append(CardSlot(132 + (i * 152), 410, self.assets))
             
         self.auto_hold_active = False 
         self.auto_play_active = False 
@@ -352,7 +360,8 @@ class IGT_Machine:
         self._init_buttons()
         self._init_meters()
         
-        self.vol_btn = VolumeButton(965, 705, self.sound)
+        # UPDATED: Volume Button Y position (785)
+        self.vol_btn = VolumeButton(965, 785, self.sound)
 
         self.state = "IDLE"
         self.bankroll = 100.00
@@ -366,7 +375,8 @@ class IGT_Machine:
         self.held_indices = []
 
     def _init_buttons(self):
-        y = 700; w, h = 90, 50
+        # UPDATED: Buttons moved down to Y=780 to clear labels
+        y = 780; w, h = 90, 50
         self.buttons = [
             PhysicalButton((30, y, 120, h), "MORE GAMES", self.act_cycle_variant),
             PhysicalButton((160, y, w, h), "AUTO HOLD", self.act_toggle_auto_hold, color=C_DIGITAL_YEL),
@@ -380,9 +390,10 @@ class IGT_Machine:
         self.btn_deal = self.buttons[-1]
 
     def _init_meters(self):
-        self.meter_win = ClickableMeter(100, 630, "WIN", C_DIGITAL_RED, default_is_credits=True)
-        self.meter_bet = ClickableMeter(500, 630, "BET", C_DIGITAL_YEL, default_is_credits=True)
-        self.meter_credit = ClickableMeter(900, 630, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
+        # Meters kept at Y=680
+        self.meter_win = ClickableMeter(100, 680, "WIN", C_DIGITAL_RED, default_is_credits=True)
+        self.meter_bet = ClickableMeter(500, 680, "BET", C_DIGITAL_YEL, default_is_credits=True)
+        self.meter_credit = ClickableMeter(900, 680, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
         self.meters = [self.meter_win, self.meter_bet, self.meter_credit]
 
     def act_toggle_auto_hold(self):
@@ -408,7 +419,8 @@ class IGT_Machine:
             self.btn_auto_play.color = C_BTN_FACE
 
     def run_solver(self):
-        best_cards = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+        # Unpack tuple (best_cards, ev) from solver
+        best_cards, _ = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
         self.held_indices = []
         for i, card in enumerate(self.hand):
             if card in best_cards:
@@ -538,12 +550,14 @@ class IGT_Machine:
     def draw_variant_label(self):
         label_text = f"Deuces Wild ({self.sim.variant})"
         text_surf = self.assets.font_ui.render(label_text, True, C_WHITE)
-        self.screen.blit(text_surf, (20, 750))
+        # UPDATED: Moved to bottom left Y=835
+        self.screen.blit(text_surf, (20, 835))
 
     def draw_denom_badge(self):
         cents = int(self.denom * 100)
         text = f"{cents}¢"
-        center_x, center_y = 730, 725
+        # UPDATED: Aligned with buttons at Y=805
+        center_x, center_y = 730, 805
         radius_x, radius_y = 40, 25
         rect = pygame.Rect(center_x - radius_x, center_y - radius_y, radius_x * 2, radius_y * 2)
         pygame.draw.ellipse(self.screen, (255, 215, 0), rect) 
@@ -557,16 +571,18 @@ class IGT_Machine:
         self.screen.fill(C_BLACK)
         self.paytable.draw(self.screen, self.coins_bet, self.last_win_rank)
         
-        pygame.draw.rect(self.screen, C_BG_BLUE, (0, 310, SCREEN_W, 310))
-        pygame.draw.line(self.screen, C_WHITE, (0, 310), (SCREEN_W, 310), 2)
-        pygame.draw.line(self.screen, C_WHITE, (0, 620), (SCREEN_W, 620), 2)
+        # UPDATED: Blue background area
+        pygame.draw.rect(self.screen, C_BG_BLUE, (0, 380, SCREEN_W, 280))
+        pygame.draw.line(self.screen, C_WHITE, (0, 380), (SCREEN_W, 380), 2)
+        pygame.draw.line(self.screen, C_WHITE, (0, 660), (SCREEN_W, 660), 2)
         
         # Draw Volume Icon
         self.vol_btn.draw(self.screen)
 
         if self.advice_msg:
             msg_surf = self.assets.font_msg.render(self.advice_msg, True, C_CYAN_MSG)
-            msg_rect = msg_surf.get_rect(center=(SCREEN_W // 2, 325))
+            # UPDATED: Centered in gap between Paytable and Cards
+            msg_rect = msg_surf.get_rect(center=(SCREEN_W // 2, 395))
             bg_rect = msg_rect.inflate(20, 10)
             pygame.draw.rect(self.screen, (0,0,50), bg_rect, border_radius=5)
             pygame.draw.rect(self.screen, C_CYAN_MSG, bg_rect, 2, border_radius=5)
@@ -574,11 +590,13 @@ class IGT_Machine:
             
         if self.auto_play_active:
             pilot_surf = self.assets.font_ui.render("PILOT ENGAGED", True, C_DIGITAL_GRN)
-            self.screen.blit(pilot_surf, (300, 750))
+            # UPDATED: Moved to bottom Y=835
+            self.screen.blit(pilot_surf, (300, 835))
             
         # --- NEW: DEALS COUNTER ---
         deals_surf = self.assets.font_lbl.render(f"DEALS: {self.hands_played}", True, C_YEL_TEXT)
-        self.screen.blit(deals_surf, (30, 680)) # Bottom Left placement
+        # UPDATED: Moved above buttons to Y=750
+        self.screen.blit(deals_surf, (30, 750)) 
 
         for c in self.cards: c.draw(self.screen)
         

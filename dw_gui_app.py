@@ -8,7 +8,8 @@ from dw_pay_constants import PAYTABLES
 # ==============================================================================
 # ⚙️ CONFIGURATION & CONSTANTS
 # ==============================================================================
-SCREEN_W, SCREEN_H = 1024, 768
+# UPDATED: Increased height to 850 to match Trainer's spacing
+SCREEN_W, SCREEN_H = 1024, 850
 FPS = 60
 
 # COLORS
@@ -202,16 +203,21 @@ class CardSlot:
 
 class PaytableDisplay:
     def __init__(self, assets, pay_data):
+        # FIXED: Added missing 'self.assets' and 'self.data'
         self.assets = assets
         self.data = pay_data
-        self.rect = pygame.Rect(30, 20, 964, 280)
         
-        # 1. Master List of all possible display rows in Rank Order
+        # UPDATED: Increased Height to 360 (was 280)
+        self.rect = pygame.Rect(30, 20, 964, 360)
+        
+        # 1. Master List
         master_order = [
             "NATURAL_ROYAL", 
             "FOUR_DEUCES_ACE", 
             "FOUR_DEUCES", 
             "FIVE_ACES", 
+            "FIVE_3_4_5",       # <--- ADD THIS
+            "FIVE_6_TO_K",      # <--- ADD THIS
             "WILD_ROYAL", 
             "FIVE_OAK", 
             "STRAIGHT_FLUSH", 
@@ -225,12 +231,14 @@ class PaytableDisplay:
         # 2. Dynamic Filter: Only include rows that exist in the current variant's data
         self.rows = [key for key in master_order if key in pay_data]
         
-        # 3. Label Map (Human Readable)
+        # 3. Label Map
         self.labels = {
             "NATURAL_ROYAL": "ROYAL FLUSH", 
             "FOUR_DEUCES_ACE": "4 DEUCES + A",
             "FOUR_DEUCES": "4 DEUCES", 
             "FIVE_ACES": "5 ACES",
+            "FIVE_3_4_5": "5 3s 4s 5s",     # <--- ADD THIS
+            "FIVE_6_TO_K": "5 6s THRU Ks",  # <--- ADD THIS
             "WILD_ROYAL": "WILD ROYAL", 
             "FIVE_OAK": "5 OF A KIND", 
             "STRAIGHT_FLUSH": "STR FLUSH", 
@@ -245,13 +253,8 @@ class PaytableDisplay:
         # 1. Background (Bottom Layer)
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
         
-        # --- DYNAMIC ROW HEIGHT LOGIC ---
-        # Standard games have ~10 rows (fits in 280px with 25px spacing)
-        # Bonus Deuces has 12 rows. We must shrink spacing to 22px to fit.
-        if len(self.rows) > 10:
-            row_h = 22
-        else:
-            row_h = 25
+        # UPDATED: Fixed row height 25px
+        row_h = 25
         
         col_w = (self.rect.width - 160) // 5
         active_x = self.rect.left + 160 + ((coins_bet - 1) * col_w)
@@ -270,6 +273,7 @@ class PaytableDisplay:
             y = start_y + (i * row_h)
             text_color = C_WHITE if key == winning_rank else C_YEL_TEXT
             name = self.labels.get(key, key)
+            # This line was crashing because self.assets was missing
             screen.blit(self.assets.font_grid.render(name, True, text_color), (self.rect.left + 10, y))
             
             base = self.data.get(key, 0)
@@ -309,9 +313,10 @@ class IGT_Machine:
         
         self.paytable = PaytableDisplay(self.assets, self.sim.paytable)
         self.cards = []
-        # Create 5 card slots on screen
+        
+        # UPDATED: Shifted Card Y position to 410 (was 340)
         for i in range(5):
-            self.cards.append(CardSlot(132 + (i * 152), 340, self.assets))
+            self.cards.append(CardSlot(132 + (i * 152), 410, self.assets))
             
         self._init_buttons()
         self._init_meters()
@@ -328,7 +333,8 @@ class IGT_Machine:
         self.held_indices = []
 
     def _init_buttons(self):
-        y = 700; w, h = 90, 50
+        # UPDATED: Shifted Buttons Y to 780
+        y = 780; w, h = 90, 50
         self.buttons = [
             PhysicalButton((30, y, 120, h), "MORE GAMES", self.act_cycle_variant),
             PhysicalButton((160, y, w, h), "SPEED", lambda: None),
@@ -339,9 +345,10 @@ class IGT_Machine:
         self.btn_deal = self.buttons[-1]
 
     def _init_meters(self):
-        self.meter_win = ClickableMeter(100, 630, "WIN", C_DIGITAL_RED, default_is_credits=True)
-        self.meter_bet = ClickableMeter(500, 630, "BET", C_DIGITAL_YEL, default_is_credits=True)
-        self.meter_credit = ClickableMeter(900, 630, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
+        # UPDATED: Shifted Meters Y to 680 (Consistent with Trainer)
+        self.meter_win = ClickableMeter(100, 680, "WIN", C_DIGITAL_RED, default_is_credits=True)
+        self.meter_bet = ClickableMeter(500, 680, "BET", C_DIGITAL_YEL, default_is_credits=True)
+        self.meter_credit = ClickableMeter(900, 680, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
         self.meters = [self.meter_win, self.meter_bet, self.meter_credit]
 
     def act_cycle_variant(self):
@@ -462,8 +469,8 @@ class IGT_Machine:
         """Draws the dynamic variant label in the bottom-left corner."""
         label_text = f"Deuces Wild ({self.sim.variant})"
         text_surf = self.assets.font_ui.render(label_text, True, C_WHITE)
-        # Position: Left-aligned, near the bottom edge
-        self.screen.blit(text_surf, (20, 750))
+        # UPDATED: Shifted Label Y to 835
+        self.screen.blit(text_surf, (20, 835))
 
     def draw_denom_badge(self):
         """Draws the yellow oval indicator for the denomination."""
@@ -471,8 +478,8 @@ class IGT_Machine:
         cents = int(self.denom * 100)
         text = f"{cents}¢"
         
-        # 2. Define Shape (Between BET MAX and DEAL)
-        center_x, center_y = 730, 725
+        # UPDATED: Aligned with buttons at Y=805
+        center_x, center_y = 730, 805
         radius_x, radius_y = 40, 25
         rect = pygame.Rect(center_x - radius_x, center_y - radius_y, radius_x * 2, radius_y * 2)
         
@@ -490,9 +497,10 @@ class IGT_Machine:
         self.screen.fill(C_BLACK)
         self.paytable.draw(self.screen, self.coins_bet, self.last_win_rank)
         
-        pygame.draw.rect(self.screen, C_BG_BLUE, (0, 310, SCREEN_W, 310))
-        pygame.draw.line(self.screen, C_WHITE, (0, 310), (SCREEN_W, 310), 2)
-        pygame.draw.line(self.screen, C_WHITE, (0, 620), (SCREEN_W, 620), 2)
+        # UPDATED: Blue background area to match new layout
+        pygame.draw.rect(self.screen, C_BG_BLUE, (0, 380, SCREEN_W, 280))
+        pygame.draw.line(self.screen, C_WHITE, (0, 380), (SCREEN_W, 380), 2)
+        pygame.draw.line(self.screen, C_WHITE, (0, 660), (SCREEN_W, 660), 2)
         
         for c in self.cards: c.draw(self.screen)
         

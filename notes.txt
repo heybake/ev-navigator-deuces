@@ -1,0 +1,18 @@
+This is another version of Deuces Wild Bonus.
+
+On videopoker.com it is titled: 10/4/3/3 (97.364%)
+
+The paytable is:
+Royal Flush No Deuces, 250
+4 Deuces Plus Ace, 400
+4 Deuces, 200
+Royal Flush W/ Deuces, 25
+5 Aces, 80
+5 3S 4S 5S, 40
+5 6S THRU KS, 20
+Straight Flush, 10
+4 of a Kind, 4
+Full House, 3
+Flush, 3
+Straight, 1
+3 of a Kind, 1

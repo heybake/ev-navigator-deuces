@@ -1,12 +1,12 @@
 """
 dw_exact_solver.py
-THE MATHEMATICAL BRAIN (v5.1 - Patch)
+THE MATHEMATICAL BRAIN (v5.2 - Bonus Deuces Tiered Support)
 
 Features:
 - Exact Expected Value (EV) calculation.
-- Supports Bonus Deuces (5 Aces, 4 Deuces w/ Ace).
+- Supports Bonus Deuces (5 Aces, 5 3s/4s/5s, 5 6s-Ks).
 - FIXED: Case-Insensitive Inputs.
-- FIXED: Wild Flush Logic (Deuces ignore suit).
+- FIXED: Wild Flush Logic.
 """
 
 from itertools import combinations
@@ -25,13 +25,12 @@ def get_deck():
 def evaluate_hand(hand, pay_table):
     """
     Evaluates a 5-card hand against the paytable.
-    Includes Bonus Deuces logic (Kickers).
+    Includes Bonus Deuces logic (Kickers and Tiered 5OAK).
     """
     # -------------------------------------------------------
     # 0. NORMALIZE INPUTS (Fixes Case Sensitivity Crash)
     # -------------------------------------------------------
     # Force ranks to Upper, suits to lower.
-    # Handles inputs like 'ts', 'Ah', '2C'
     clean_hand = [(c[0].upper(), c[1].lower()) for c in hand]
     
     ranks = [c[0] for c in clean_hand]
@@ -43,10 +42,9 @@ def evaluate_hand(hand, pay_table):
     # 0. FLUSH LOGIC (Fixes Wild Flush Bug)
     # -------------------------------------------------------
     # A flush exists if all NON-DEUCE cards share the same suit.
-    # The deuces simply adopt that suit.
     non_deuce_suits = [c[1] for c in clean_hand if c[0] != '2']
     if not non_deuce_suits:
-        is_flush = True # 5 Deuces is technically suited (doesn't matter, pays 5OAK/4Deuces)
+        is_flush = True # 5 Deuces is technically suited
     else:
         is_flush = len(set(non_deuce_suits)) == 1
 
@@ -54,7 +52,6 @@ def evaluate_hand(hand, pay_table):
     # 1. NATURAL ROYAL FLUSH
     # -------------------------------------------------------
     # Must be 0 deuces and "Natural" flush (all actual suits match)
-    # Re-check suits including deuces for Natural Royal requirement
     is_natural_suited = len(set(suits)) == 1
     
     if deuce_count == 0 and is_natural_suited:
@@ -78,20 +75,31 @@ def evaluate_hand(hand, pay_table):
             return pay_table["WILD_ROYAL"]
 
     # -------------------------------------------------------
-    # 4. FIVE OF A KIND (Check 5 Aces)
+    # 4. FIVE OF A KIND (Tiered Logic Updated)
     # -------------------------------------------------------
     if non_deuces:
         counts = Counter(non_deuces)
         most_common_rank, count = counts.most_common(1)[0]
         total_count = count + deuce_count
+        five_oak_rank = most_common_rank # The rank determining the payout
     else:
         total_count = deuce_count
+        five_oak_rank = 'A' # 5 Deuces counts as Aces for kicker purposes usually
 
     if total_count >= 5:
-        if non_deuces and all(r == 'A' for r in non_deuces):
-             if "FIVE_ACES" in pay_table:
-                return pay_table["FIVE_ACES"]
-        return pay_table["FIVE_OAK"]
+        # Tier 1: 5 Aces
+        if five_oak_rank == 'A':
+             if "FIVE_ACES" in pay_table: return pay_table["FIVE_ACES"]
+             return pay_table.get("FIVE_OAK", 15)
+
+        # Tier 2: 5 3s, 4s, 5s (New!)
+        if five_oak_rank in ['3', '4', '5']:
+             if "FIVE_3_4_5" in pay_table: return pay_table["FIVE_3_4_5"]
+             return pay_table.get("FIVE_OAK", 15)
+
+        # Tier 3: 5 6s thru Ks (Explicit or Generic)
+        if "FIVE_6_TO_K" in pay_table: return pay_table["FIVE_6_TO_K"]
+        return pay_table.get("FIVE_OAK", 15)
 
     # -------------------------------------------------------
     # 5. STRAIGHT FLUSH

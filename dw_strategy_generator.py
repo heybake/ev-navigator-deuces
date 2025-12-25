@@ -1,12 +1,13 @@
 """
 dw_strategy_generator.py
-THE STRATEGY DISCOVERY ENGINE (v9.0 - The Golden Seed)
+THE STRATEGY DISCOVERY ENGINE (v9.4 - Classifier Patch)
 
 Features:
-- "Golden Seed" Injection: Ensures rare hands (Royals, 5 Aces) always appear.
-- "Microscope" Classifier: Distinguishes Bonus hands (4 Deuces+Ace).
-- Resume Capability.
-- Auto-Save.
+- "Golden Seed" Injection.
+- "Microscope" Classifier:
+    - FIXED: Distinguishes "Pat 4 Deuces + Ace" from "Pat 5 Aces".
+    - Distinguishes Tiered 5-of-a-Kind (3s/4s/5s vs 6s-Ks).
+- Resume Capability & Auto-Save.
 """
 
 import multiprocessing
@@ -32,6 +33,7 @@ CONFIG = {
 # 🧠 THE "MICROSCOPE" CLASSIFIER LOGIC
 # ==========================================
 def get_ranks_suits(cards):
+    # Map: 2=0, 3=1, ... A=12
     rank_map = {r: i for i, r in enumerate("23456789TJQKA")}
     ranks = sorted([rank_map[c[0]] for c in cards])
     suits = [c[1] for c in cards]
@@ -54,49 +56,67 @@ def classify_hold(held_cards):
     num_deuces = len(deuces)
     count = len(held_cards)
     
-    # --- DEUCE HEAVY ---
-    if num_deuces == 4: 
-        # Check for Ace Kicker (Bonus Deuces)
-        non_deuces = [c for c in held_cards if c[0] != '2']
-        if non_deuces and non_deuces[0].startswith('A'):
-            return "4_DEUCES_ACE"
-        return "4_DEUCES"
-        
-    if num_deuces == 3: return "3_DEUCES"
+    # --- HELPER: Is this a Flush (ignoring Deuce suits)? ---
+    non_deuce_suits = [c[1] for c in held_cards if c[0] != '2']
+    is_wild_flush = len(set(non_deuce_suits)) <= 1
     
-    # --- PAT HANDS (Held 5) ---
+    non_deuce_ranks = [r for r in ranks if r != 0] # 0 is Deuce
+
+    # ==================================================
+    # 1. PAT HANDS (Held 5) - CHECK FIRST!
+    # ==================================================
     if count == 5:
-        # Natural Royal
+        # --- NEW: CRITICAL PATCH FOR 4 DEUCES + ACE ---
+        # If we hold 5 cards and 4 are deuces, identifying the kicker is vital
+        if num_deuces == 4:
+            # Check for Ace Kicker
+            if any(r == 12 for r in non_deuce_ranks): # 12 is Ace
+                return "4_DEUCES_ACE"
+            return "4_DEUCES" # Pat 4 Deuces (with junk kicker)
+
+        # A. Natural Royal (Must be strict suits, no deuces)
         if num_deuces == 0 and len(set(suits)) == 1:
              if set(ranks) == {8, 9, 10, 11, 12}: return "NATURAL_ROYAL"
              
-        # Five Aces (1 Deuce + 4 Aces)
-        if num_deuces == 1:
-            # 0 is deuce index. 12 is Ace.
-            non_deuce_ranks = [r for r in ranks if r != 0]
-            if len(non_deuce_ranks) == 4 and all(r == 12 for r in non_deuce_ranks):
-                return "FIVE_ACES"
-            # Generic 5 OAK (1 Deuce + 4 of a Kind)
-            if len(set(non_deuce_ranks)) == 1:
-                return "PAT_5_OAK"
+        # B. 5 OF A KIND LOGIC
+        if num_deuces > 0 and len(set(non_deuce_ranks)) == 1:
+            rank_val = non_deuce_ranks[0]
+            if rank_val == 12: return "FIVE_ACES"
+            if 1 <= rank_val <= 3: return "FIVE_3_4_5"
+            return "FIVE_6_TO_K" 
 
-        if num_deuces == 2: return "PAT_5_OAK_OR_WILD_ROYAL"
-        is_flush = len(set(suits)) == 1
-        if is_flush: return "PAT_FLUSH_OR_STR_FLUSH"
+        # C. WILD ROYAL vs STRAIGHT FLUSH
+        if is_wild_flush:
+            if all(r >= 8 for r in non_deuce_ranks):
+                return "WILD_ROYAL"
+            return "PAT_FLUSH_OR_STR_FLUSH"
+        
         return "PAT_STRAIGHT_OR_FULL_HOUSE"
 
-    # --- 2 DEUCES ---
+    # ==================================================
+    # 2. DEUCE HEAVY (Partial Holds)
+    # ==================================================
+    if num_deuces == 4: 
+        # Partial hold of 4 Deuces (dropped kicker)
+        # Note: Logic usually holds 5 if kicker is Ace, drops if junk.
+        # But if we dropped the kicker, we don't have the Ace anymore.
+        return "4_DEUCES"
+        
+    if num_deuces == 3: return "3_DEUCES"
     if num_deuces == 2: return "2_DEUCES"
 
-    # --- 1 DEUCE ---
+    # ==================================================
+    # 3. ONE DEUCE
+    # ==================================================
     if num_deuces == 1:
         non_deuce_cards = [c for c in held_cards if c[0] != '2']
         nd_ranks, nd_suits = get_ranks_suits(non_deuce_cards)
-        is_suited = len(set(nd_suits)) == 1
         
-        if len(set(nd_ranks)) < len(nd_ranks): return "3_KIND" # Pair + Deuce
+        is_suited_non_deuce = len(set(nd_suits)) <= 1
+        
+        if len(set(nd_ranks)) < len(nd_ranks): return "3_KIND" 
             
-        if is_suited:
+        if is_suited_non_deuce:
             if len(non_deuce_cards) == 3:
                 if is_royal_draw(nd_ranks): return "1_DEUCE_3_ROYAL"
                 gaps = count_gaps(nd_ranks)
@@ -112,9 +132,15 @@ def classify_hold(held_cards):
                 return "1_DEUCE_2_FLUSH"
         return "1_DEUCE_GENERIC"
 
-    # --- NATURALS ---
+    # ==================================================
+    # 4. NATURALS (No Deuces)
+    # ==================================================
     if len(set(ranks)) == 1 and count > 1:
-        if count == 3: return "3_KIND"
+        rank_val = ranks[0]
+        if count == 3:
+            if rank_val == 12: return "3_ACES" 
+            if 1 <= rank_val <= 3: return "3_3_4_5"
+            return "3_KIND"
         if count == 2: return "1_PAIR"
         
     if count == 4 and len(set(ranks)) == 2: return "2_PAIR"
@@ -152,17 +178,18 @@ def get_golden_hands(variant):
         ['Ts', 'Js', 'Qs', 'Ks', 'As'],  # NATURAL_ROYAL
         ['2s', '2h', '2c', '2d', '3h'],  # 4_DEUCES
         ['2s', 'Js', 'Qs', 'Ks', 'As'],  # Wild Royal (Pat)
-        ['8s', '8c', '8h', '8d', '2s'],  # PAT_5_OAK
+        ['8s', '8c', '8h', '8d', '2s'],  # FIVE_6_TO_K
         ['9s', 'Ts', 'Js', 'Qs', 'Ks'],  # PAT_STR_FLUSH
         ['3s', '3h', '3c', '3d', '5h'],  # 4 of a Kind (Pat)
         ['3s', '3h', '3c', '4d', '4h'],  # Full House (Pat)
         ['3s', '5s', '7s', '9s', 'Js'],  # Flush (Pat)
         ['3s', '4h', '5c', '6d', '7s'],  # Straight (Pat)
     ]
-    # Variant Seeds
-    if variant in ["BONUS_DEUCES", "DBW"]:
+    # Variant Seeds (Bonus Deuces logic)
+    if "BONUS" in variant or "DBW" in variant:
         hands.append(['2s', '2h', '2c', '2d', 'As']) # 4_DEUCES_ACE
         hands.append(['As', 'Ac', 'Ah', 'Ad', '2s']) # FIVE_ACES
+        hands.append(['3s', '3c', '3h', '3d', '2s']) # FIVE_3_4_5 (New!)
         
     return hands
 
@@ -170,7 +197,11 @@ def process_golden_seeds(variant):
     """Solves the golden hands to inject into the dataset."""
     seeds = get_golden_hands(variant)
     results = []
-    paytable = dw_exact_solver.PAYTABLES[variant]
+    if variant not in PAYTABLES:
+        print(f"⚠️ Warning: Variant {variant} not found in PAYTABLES. Using defaults.")
+        paytable = list(PAYTABLES.values())[0]
+    else:
+        paytable = PAYTABLES[variant]
     
     print(f"🌟 Seeding {len(seeds)} 'Golden Hands' (Jackpots & Rare Events)...")
     
@@ -187,7 +218,7 @@ def process_golden_seeds(variant):
 def worker_task(params):
     variant_name = params
     sim = DeucesWildSim(variant=variant_name)
-    paytable = dw_exact_solver.PAYTABLES[variant_name]
+    paytable = PAYTABLES[variant_name]
     hand, _ = sim.core.deal_hand()
     best_hold, max_ev = dw_exact_solver.solve_hand_silent(hand, paytable)
     label = classify_hold(best_hold)
@@ -319,9 +350,7 @@ def run_generator_session():
         }
 
     # 4. DISPLAY
-    total_run_samples = history_samples + new_samples # Note: Seeds add extra samples but we won't count them in the header to avoid confusion? 
-    # Actually, let's include them in the count.
-    # The 'Samples' column in CSV will reflect seeds + random.
+    total_run_samples = history_samples + new_samples 
     
     print("-" * 65)
     print(f"🏆 STRATEGY CHART: {variant}")
@@ -393,7 +422,7 @@ def main_menu():
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         print("==========================================")
-        print("🧬 STRATEGY DISCOVERY ENGINE (v9.0)")
+        print("🧬 STRATEGY DISCOVERY ENGINE (v9.4)")
         print("==========================================")
         print(f"[Config: {CONFIG['VARIANT']} | {CONFIG['SAMPLES']} Hands | {CONFIG['CORES']} Cores]")
         print("1. 🚀 Run Generation")

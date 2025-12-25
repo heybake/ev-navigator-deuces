@@ -64,16 +64,17 @@ PAYTABLES = {
         "NOTHING": 0,
         "ERROR": 0
     },
-    "BONUS_DEUCES": {
+"BONUS_DEUCES_10_4": { 
         "NATURAL_ROYAL": 800,
         "FOUR_DEUCES_ACE": 400,
         "FOUR_DEUCES": 200,
         "FIVE_ACES": 80,
+        "FIVE_3_4_5": 40,        # The new middle tier
+        "FIVE_6_TO_K": 20,       # The new low tier (Must match solver output!)
         "WILD_ROYAL": 25,
-        "FIVE_OAK": 20,
         "STRAIGHT_FLUSH": 10,
         "FOUR_OAK": 4,
-        "FULL_HOUSE": 4,
+        "FULL_HOUSE": 3,
         "FLUSH": 3,
         "STRAIGHT": 1,
         "THREE_OAK": 1

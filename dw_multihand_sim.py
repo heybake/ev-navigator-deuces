@@ -87,7 +87,23 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
 
     net_result = total_winnings - total_bet
     counts = Counter(results)
-    interests = ["NATURAL_ROYAL", "FOUR_DEUCES", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH"]
+    
+    # --- UPDATE: Add the Bonus Deuces specific keys here ---
+    interests = [
+        "NATURAL_ROYAL", 
+        "FOUR_DEUCES_ACE",  # New Jackpot
+        "FOUR_DEUCES", 
+        "FIVE_ACES",        # New Jackpot
+        "FIVE_3_4_5",       # New Jackpot
+        "FIVE_6_TO_K",      # New Payout
+        "WILD_ROYAL", 
+        "FIVE_OAK", 
+        "STRAIGHT_FLUSH", 
+        "FOUR_OAK", 
+        "FULL_HOUSE", 
+        "FLUSH"
+    ]
+    
     top_hits = [f"{k.replace('_',' ').title()}({v})" for k,v in counts.items() if k in interests and v > 0]
     hit_str = ", ".join(top_hits) if top_hits else "No Jackpots"
     
@@ -156,7 +172,7 @@ def run_interactive_coach(variant, denom, wheel_active):
 # ==========================================
 if __name__ == "__main__":
     print("==========================================")
-    print("🧬 MULTI-HAND SIMULATOR (v7.1 - MICROSERVICE)")
+    print("🧬 MULTI-HAND SIMULATOR (v7.2 - MICROSERVICE)")
     print("==========================================")
     
     variant = DEFAULT_VARIANT

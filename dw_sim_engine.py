@@ -1,12 +1,12 @@
 """
 dw_sim_engine.py
-CORE SIMULATION LOGIC (v4.3 - Flush Logic Hotfix)
+CORE SIMULATION LOGIC (v4.4 - Bonus Deuces Tiered Support)
 
 Features:
 - Robust Input Normalization
-- Bonus Deuces Logic (4 Deuces w/ Ace, 5 Aces)
+- Bonus Deuces Logic (4 Deuces w/ Ace, 5 Aces, 5 3s/4s/5s)
 - Wheel Mechanics Stub
-- Bet Amount Calculation (Fixes Multi-Hand Crash)
+- Bet Amount Calculation
 - FIXED: Wild Flush Logic (Deuces ignore suit)
 """
 
@@ -46,7 +46,7 @@ class DeucesWildSim:
         self.paytable = self.pay_table # Legacy Alias
         self.core = DeucesWildCore()
         
-        # --- BET LOGIC (Fixes 'no attribute bet_amount') ---
+        # --- BET LOGIC ---
         # DBW requires 10 coins (5 bet + 5 feature). Standard is 5.
         coins_per_hand = 10 if variant == "DBW" else 5
         self.bet_amount = denom * coins_per_hand
@@ -106,7 +106,6 @@ class DeucesWildSim:
         
         # --- FIXED FLUSH LOGIC ---
         # A flush relies ONLY on the suits of non-deuce cards.
-        # If I have 3 Clubs and 2 Deuces (Heart, Spade), it IS a Club Flush.
         non_deuce_suits = [c[1] for c in hand if c[0] != '2']
         
         deuce_count = ranks.count('2')
@@ -133,18 +132,30 @@ class DeucesWildSim:
             if all(r in set("TJQKA") for r in non_deuces):
                 return "WILD_ROYAL", self.pay_table["WILD_ROYAL"]
 
-        # 4. FIVE OF A KIND (Check 5 Aces)
+        # 4. FIVE OF A KIND (Updated Tiered Logic)
         if non_deuces:
             most_common_rank, count = rank_counts.most_common(1)[0]
             total_count = count + deuce_count
+            five_oak_rank = most_common_rank
         else:
             total_count = deuce_count
+            five_oak_rank = 'A' # Theoretical 5 Deuces
 
         if total_count >= 5:
-            if non_deuces and all(r == 'A' for r in non_deuces):
-                 if "FIVE_ACES" in self.pay_table:
-                    return "FIVE_ACES", self.pay_table["FIVE_ACES"]
-            return "FIVE_OAK", self.pay_table["FIVE_OAK"]
+            # Tier 1: 5 Aces
+            if five_oak_rank == 'A' and "FIVE_ACES" in self.pay_table:
+                return "FIVE_ACES", self.pay_table["FIVE_ACES"]
+            
+            # Tier 2: 5 3s, 4s, 5s (New!)
+            if five_oak_rank in ['3', '4', '5'] and "FIVE_3_4_5" in self.pay_table:
+                return "FIVE_3_4_5", self.pay_table["FIVE_3_4_5"]
+            
+            # Tier 3: 5 6s thru Ks (Explicit)
+            if "FIVE_6_TO_K" in self.pay_table:
+                return "FIVE_6_TO_K", self.pay_table["FIVE_6_TO_K"]
+                
+            # Generic Fallback
+            return "FIVE_OAK", self.pay_table.get("FIVE_OAK", 15)
 
         # 5. STRAIGHT FLUSH
         if is_flush:

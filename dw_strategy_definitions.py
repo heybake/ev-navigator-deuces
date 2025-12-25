@@ -1,11 +1,8 @@
 """
 dw_strategy_definitions.py
-STRATEGY REGISTRY (Phase 2 - Bonus Deuces Added)
+STRATEGY REGISTRY (Phase 4 - Bonus Deuces 10/4/3/3 Finalized)
 
 Contains the Ordered Priority Lists (Strategy Matrix) for Deuces Wild variants.
-Logic derived from 'NSUD_Core_Strategy.txt', 'Airport_Deuces_Strategy.txt', 
-and 'Bonus_Deuces_Solver_Output.csv'.
-
 AXIOM: The Engine iterates this list top-to-bottom. The first match wins.
 """
 
@@ -19,8 +16,8 @@ STRATEGY_MATRIX = {
         
         3: [
             ("NATURAL_ROYAL", "HOLD"), 
-            ("WILD_ROYAL", "HOLD"),    
-            ("FIVE_OAK", "HOLD"),      
+            ("WILD_ROYAL", "HOLD"),     
+            ("FIVE_OAK", "HOLD"),       
             ("3_DEUCES", "HOLD_DEUCES")
         ],
         
@@ -136,46 +133,52 @@ STRATEGY_MATRIX = {
     },
     
     # ==========================================
-    # 💎 BONUS DEUCES - THE JACKPOT HUNTER
-    # 5 Aces = 80. 4 Deuces+Ace = 400.
-    # Source: Generated Solver Data (10k Hands)
+    # 💎 BONUS DEUCES (10/4/3/3)
+    # Generated from 10k Samples (v9.4 Engine)
     # ==========================================
-    "BONUS_DEUCES": {
+    "BONUS_DEUCES_10_4": {
         4: [
-            ("4_DEUCES_ACE", "HOLD_ALL"),   # Pays 400 (EV 2000) -> HOLD
-            ("4_DEUCES", "HOLD_DEUCES")     # Pays 200 (EV 1085 > 1000) -> BREAK Kicker
+            ("4_DEUCES_ACE", "HOLD_ALL"),       # EV 2000 > 1085
+            ("4_DEUCES", "HOLD_DEUCES")         # Break kicker (EV 1085)
         ],
         
         3: [
-            ("FIVE_ACES", "HOLD"),          # Pays 80 (EV 400) -> HOLD
-            ("3_DEUCES", "HOLD_DEUCES"),    # EV 75.8. BEATS Wild Royal (25) and 5OAK (20)
-            ("WILD_ROYAL", "HOLD_DEUCES"),  # Intentionally Break
-            ("FIVE_OAK", "HOLD_DEUCES")     # Intentionally Break
+            ("FIVE_ACES", "HOLD"),              # EV 400 > 81
+            ("FIVE_3_4_5", "HOLD"),             # EV 200 > 81
+            ("WILD_ROYAL", "HOLD"),             # EV 125 > 81
+            ("FIVE_6_TO_K", "HOLD"),            # EV 100 > 81
+            ("3_DEUCES", "HOLD_DEUCES")         # EV 81.5
         ],
         
         2: [
             ("NATURAL_ROYAL", "HOLD"),
-            ("FIVE_ACES", "HOLD"),      
-            ("WILD_ROYAL", "HOLD"),         # Pays 25 (EV 125 > 18.5)
-            ("FIVE_OAK", "HOLD"),           # Pays 20 (EV 100 > 18.5)
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), # EV 42 > 18.5
-            ("2_DEUCES", "HOLD_DEUCES") 
+            ("FIVE_ACES", "HOLD"),
+            ("FIVE_3_4_5", "HOLD"),
+            ("WILD_ROYAL", "HOLD"),
+            ("FIVE_6_TO_K", "HOLD"),
+            ("STRAIGHT_FLUSH", "HOLD"),         # Pays 50 > 18.6
+            ("4_TO_ROYAL", "DRAW_COMBINATION"), # Natural 4-Royal EV ~98
+            ("2_DEUCES", "HOLD_DEUCES")         # EV 18.6 (Beats Pat Flush @ 15)
         ],
         
         1: [
             ("NATURAL_ROYAL", "HOLD"),
             ("FIVE_ACES", "HOLD"),
+            ("FIVE_3_4_5", "HOLD"),
             ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
+            ("FIVE_6_TO_K", "HOLD"),
             ("STRAIGHT_FLUSH", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), # EV ~23.8
-            ("MADE_FULL_HOUSE", "HOLD"),        # EV 20
-            ("MADE_FLUSH", "HOLD"),             # EV 15
-            ("MADE_STRAIGHT", "HOLD"),          # EV 5
-            ("MADE_4OAK", "HOLD"),              # EV 20
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), 
-            ("1_DEUCE", "HOLD_DEUCES")          # EV 4.67
+            ("4_TO_ROYAL", "DRAW_COMBINATION"),
+            ("MADE_FULL_HOUSE", "HOLD"),        # 15 > 4.73
+            ("MADE_FLUSH", "HOLD"),             # 15 > 4.73
+            ("MADE_3OAK", "HOLD"),              # 10-12 > 4.73 (Includes Pair+Deuce)
+            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), # 11.1 > 4.73
+            ("MADE_STRAIGHT", "HOLD"),          # 5 > 4.73
+            ("4_TO_SF_GAP", "DRAW_COMBINATION"),  # 9.5 > 4.73
+            ("3_TO_ROYAL", "DRAW_COMBINATION"),   # 5.3 > 4.73
+            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"), # 4.9 > 4.73
+            ("4_TO_FLUSH", "DRAW_COMBINATION"),   # 4.87 > 4.73 (Aggressive!)
+            ("1_DEUCE", "HOLD_DEUCES")
         ],
         
         0: [
@@ -185,14 +188,18 @@ STRATEGY_MATRIX = {
             ("MADE_4OAK", "HOLD"),
             ("MADE_FULL_HOUSE", "HOLD"),
             ("MADE_FLUSH", "HOLD"),
-            ("MADE_STRAIGHT", "HOLD"),
             ("MADE_3OAK", "HOLD"),
+            ("MADE_STRAIGHT", "HOLD"),
             ("4_TO_SF_OPEN", "DRAW_COMBINATION"),
             ("3_TO_ROYAL", "DRAW_COMBINATION"),
+            ("4_TO_SF_GAP", "DRAW_COMBINATION"),
             ("4_TO_FLUSH", "DRAW_COMBINATION"),
-            ("TWO_PAIR", "HOLD"),
-            ("PAIR", "HOLD"),
-            ("DISCARD_ALL", "REDRAW")
+            ("PAIR", "HOLD"),                   # EV 2.7
+            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"), # 2.42 > 1.47
+            ("3_TO_SF_GAP", "DRAW_COMBINATION"),     # 2.04 > 1.47
+            ("3_TO_FLUSH", "DRAW_COMBINATION"),      # 1.67 > 1.47
+            ("2_TO_ROYAL", "DRAW_COMBINATION"),      # 1.56 > 1.47
+            ("DISCARD_ALL", "REDRAW")           # EV 1.47
         ]
     },
 
@@ -306,5 +313,30 @@ STRATEGY_MATRIX = {
             ("3_TO_SF_CONNECT", "DRAW_COMBINATION"),
             ("DISCARD_ALL", "REDRAW")
         ]
+    }
+}
+
+# ==========================================
+# ⚙️ GENERATOR CONFIGURATION
+# Input definitions for dw_strategy_generator.py
+# ==========================================
+GAME_VARIANTS = {
+    "BONUS_DEUCES_10_4": {
+        "name": "Bonus Deuces Wild (10/4/3/3)",
+        "paytable": {
+            "NATURAL_ROYAL": 800,    # Standard 800 (4000 total)
+            "FOUR_DEUCES_ACE": 400,  # 2000 total
+            "FOUR_DEUCES": 200,      # 1000 total
+            "FIVE_ACES": 80,         # 400 total
+            "FIVE_3_4_5": 40,        # 200 total (The Critical Differentiator)
+            "FIVE_6_TO_K": 20,       # 100 total (Explicit Key)
+            "WILD_ROYAL": 25,        # 125 total
+            "STRAIGHT_FLUSH": 10,    # 50 total
+            "FOUR_OAK": 4,           # 20 total
+            "FULL_HOUSE": 3,         # 15 total
+            "FLUSH": 3,              # 15 total
+            "STRAIGHT": 1,           # 5 total
+            "THREE_OAK": 1           # 5 total
+        }
     }
 }

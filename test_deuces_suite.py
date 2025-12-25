@@ -26,6 +26,13 @@ try:
 except ImportError:
     PLOT_TOOLS_AVAILABLE = False
 
+# Try to import Fast Solver for testing
+try:
+    import dw_fast_solver
+    FAST_SOLVER_AVAILABLE = True
+except ImportError:
+    FAST_SOLVER_AVAILABLE = False
+
 # ==========================================
 # 🧠 CORE ENGINE TESTS (Updated for v3.2)
 # ==========================================
@@ -90,7 +97,7 @@ class TestBonusDeucesLogic(unittest.TestCase):
     Verifies the specific kicker logic for 'Bonus Deuces' games.
     """
     def setUp(self):
-        self.sim_bonus = DeucesWildSim(variant="BONUS_DEUCES")
+        self.sim_bonus = DeucesWildSim(variant="BONUS_DEUCES_10_4")
         self.sim_std = DeucesWildSim(variant="NSUD")
 
     def test_five_aces_detection(self):
@@ -106,6 +113,22 @@ class TestBonusDeucesLogic(unittest.TestCase):
         rank_s, pay_s = self.sim_std.evaluate_hand(hand)
         self.assertEqual(rank_s, "FIVE_OAK")
         self.assertEqual(pay_s, 16)
+
+    def test_five_3_4_5_detection(self):
+        """NEW: Verifies 5 of a Kind (3s, 4s, 5s) pays 40."""
+        # 1 Deuce + 4 Threes
+        hand = ["2s", "3h", "3d", "3c", "3s"]
+        rank, pay = self.sim_bonus.evaluate_hand(hand)
+        self.assertEqual(rank, "FIVE_3_4_5")
+        self.assertEqual(pay, 40)
+
+    def test_five_6_to_k_detection(self):
+        """NEW: Verifies 5 of a Kind (6s thru Ks) pays 20."""
+        # 1 Deuce + 4 Eights
+        hand = ["2s", "8h", "8d", "8c", "8s"]
+        rank, pay = self.sim_bonus.evaluate_hand(hand)
+        self.assertEqual(rank, "FIVE_6_TO_K")
+        self.assertEqual(pay, 20)
 
     def test_four_deuces_with_ace(self):
         # 4 Deuces + Ace Kicker
@@ -156,10 +179,62 @@ class TestStrategyClassifier(unittest.TestCase):
         label = classify_hold(hand)
         self.assertEqual(label, "FIVE_ACES")
 
+    def test_classify_five_3_4_5(self):
+        """NEW: Ensure 3s/4s/5s are labeled correctly."""
+        hand = ['3s', '3c', '3h', '3d', '2s']
+        label = classify_hold(hand)
+        self.assertEqual(label, "FIVE_3_4_5")
+
+    def test_classify_five_6_to_k(self):
+        """NEW: Ensure 6s-Ks are labeled correctly."""
+        hand = ['Ks', 'Kc', 'Kh', 'Kd', '2s']
+        label = classify_hold(hand)
+        self.assertEqual(label, "FIVE_6_TO_K")
+
     def test_classify_natural_royal(self):
         hand = ['Ts', 'Js', 'Qs', 'Ks', 'As']
         label = classify_hold(hand)
         self.assertEqual(label, "NATURAL_ROYAL")
+
+
+# ==========================================
+# ⚡ NEW: FAST SOLVER TESTS (Added for v5.4)
+# ==========================================
+@unittest.skipUnless(FAST_SOLVER_AVAILABLE, "Fast Solver not importable")
+class TestFastSolver(unittest.TestCase):
+    """
+    Verifies the logic of dw_fast_solver.py, especially regarding
+    tiered payouts and return structures.
+    """
+    def setUp(self):
+        self.pt_bonus = MASTER_REGISTRY["BONUS_DEUCES_10_4"]
+
+    def test_return_structure(self):
+        """Critical: Trainer expects (hand, ev) tuple."""
+        hand = ['2s', '2h', '2c', '2d', '3s']
+        result = dw_fast_solver.solve_hand(hand, self.pt_bonus)
+        
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result[0], list) # The Held Cards
+        self.assertIsInstance(result[1], float) # The EV
+
+    def test_fast_eval_bonus_math(self):
+        """Verifies Fast Solver calculates correct EV for tiered hands."""
+        # 5 Aces (Pay 80)
+        hand_aces = ['As', 'Ac', 'Ah', 'Ad', '2s']
+        _, ev = dw_fast_solver.solve_hand(hand_aces, self.pt_bonus)
+        self.assertAlmostEqual(ev, 80.0, places=1)
+
+        # 5 Threes (Pay 40)
+        hand_3s = ['3s', '3c', '3h', '3d', '2s']
+        _, ev = dw_fast_solver.solve_hand(hand_3s, self.pt_bonus)
+        self.assertAlmostEqual(ev, 40.0, places=1)
+
+        # 5 Eights (Pay 20)
+        hand_8s = ['8s', '8c', '8h', '8d', '2s']
+        _, ev = dw_fast_solver.solve_hand(hand_8s, self.pt_bonus)
+        self.assertAlmostEqual(ev, 20.0, places=1)
 
 
 class TestDualCoreStrategy(unittest.TestCase):
@@ -288,8 +363,8 @@ class TestProtocolGuardian(unittest.TestCase):
 class TestExactSolver(unittest.TestCase):
     def setUp(self):
         self.pt = PAYTABLES["NSUD"]
-        # NEW: Load Bonus table for math verification
-        self.pt_bonus = MASTER_REGISTRY["BONUS_DEUCES"]
+        # FIX: Updated key to match the actual system definition
+        self.pt_bonus = MASTER_REGISTRY["BONUS_DEUCES_10_4"]
 
     def test_solver_royal_flush_ev(self):
         hand = ['ts', 'js', 'qs', 'ks', 'as']
@@ -415,6 +490,6 @@ class TestPayTableQuarantine(unittest.TestCase):
 
 if __name__ == '__main__':
     print("========================================")
-    print("🧬 DEUCES WILD INTEGRITY CHECK (v5.1)")
+    print("🧬 DEUCES WILD INTEGRITY CHECK (v5.2)")
     print("========================================")
     unittest.main(verbosity=2)
