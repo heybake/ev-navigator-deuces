@@ -128,7 +128,7 @@ class AssetManager:
             self.back = s
 
 # ==============================================================================
-# 📜 LOG PANEL (NOTEBOOK EDITION - INTERACTIVE SCROLL)
+# 📜 LOG PANEL (NOTEBOOK EDITION - WITH HUD)
 # ==============================================================================
 class LogPanel:
     def __init__(self, x, y, w, h, assets):
@@ -138,7 +138,13 @@ class LogPanel:
         self.scroll_y = 0 
         self.entry_height = 110
         self.content_height = 0
-        self.header_h = 40
+        # Increased header height for HUD
+        self.header_h = 75
+        
+        # Stats
+        self.total_bet = 0.0
+        self.total_won = 0.0
+        self.total_hands = 0
         
         # Scroll Interaction State
         self.is_dragging = False
@@ -146,41 +152,46 @@ class LogPanel:
         self.scroll_start_y = 0
         self.thumb_rect = pygame.Rect(0,0,0,0) 
 
-    def add_entry(self, hand_num, deal_cards, final_cards, held_indices, ev_data, result_data):
+    def add_entry(self, hand_num, deal_cards, final_cards, held_indices, ev_data, result_data, bet_amount):
+        """
+        Adds a new hand to the log history and updates stats.
+        """
         entry = {
             'id': hand_num,
             'deal': deal_cards,
             'final': final_cards,
             'held_idx': held_indices,
             'ev': ev_data,
-            'result': result_data
+            'result': result_data,
+            'bet': bet_amount
         }
         self.logs.insert(0, entry)
         self.content_height = len(self.logs) * self.entry_height
+        
+        # Update Stats
+        self.total_hands += 1
+        self.total_bet += bet_amount
+        self.total_won += result_data['win']
 
     def handle_event(self, event):
         mouse_pos = pygame.mouse.get_pos()
         
-        # 1. Mouse Wheel
         if event.type == pygame.MOUSEWHEEL:
             if self.rect.collidepoint(mouse_pos):
                 self.scroll_y -= event.y * 20
                 self._clamp_scroll()
 
-        # 2. Start Drag
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1: # Left Click
+            if event.button == 1:
                 if self.thumb_rect.collidepoint(mouse_pos):
                     self.is_dragging = True
                     self.drag_start_y = mouse_pos[1]
                     self.scroll_start_y = self.scroll_y
 
-        # 3. Stop Drag
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
                 self.is_dragging = False
 
-        # 4. Dragging Motion
         elif event.type == pygame.MOUSEMOTION:
             if self.is_dragging:
                 delta_y = mouse_pos[1] - self.drag_start_y
@@ -197,6 +208,24 @@ class LogPanel:
         if self.scroll_y < 0: self.scroll_y = 0
         if self.scroll_y > max_scroll: self.scroll_y = max_scroll
 
+    def _calculate_hud_stats(self):
+        # RTP
+        rtp = (self.total_won / self.total_bet * 100) if self.total_bet > 0 else 0.0
+        
+        # Hit Rate (Session)
+        hits = sum(1 for log in self.logs if log['result']['win'] > 0)
+        hit_rate = (hits / self.total_hands * 100) if self.total_hands > 0 else 0.0
+        
+        # Last 10 Momentum
+        last_10 = self.logs[:10]
+        if not last_10:
+            l10_rate = 0.0
+        else:
+            l10_hits = sum(1 for log in last_10 if log['result']['win'] > 0)
+            l10_rate = (l10_hits / len(last_10)) * 100
+            
+        return rtp, hit_rate, l10_rate
+
     def draw_cards_text(self, screen, cards, x, y, highlights=None):
         suit_map = {'s': '♠', 'c': '♣', 'h': '♥', 'd': '♦'}
         font = self.assets.font_log_bold
@@ -204,19 +233,15 @@ class LogPanel:
         
         for i, card in enumerate(cards):
             current_x = x + (i * char_w)
-            
-            # 1. Draw Highlighter
             if highlights and i in highlights:
                 bg_rect = pygame.Rect(current_x - 2, y, char_w - 2, 20)
                 pygame.draw.rect(screen, C_NB_HIGHLIGHT, bg_rect)
 
-            # 2. Determine Color
             rank = card[0]
             suit_char = card[1]
             symbol = suit_map.get(suit_char, suit_char)
             color = C_NB_RED if suit_char in 'hd' else C_NB_BLACK
             
-            # 3. Draw Text
             txt = font.render(f"{rank}{symbol}", True, color)
             screen.blit(txt, (current_x, y))
 
@@ -225,13 +250,31 @@ class LogPanel:
         pygame.draw.rect(screen, C_NB_BG, self.rect)
         pygame.draw.rect(screen, C_NB_TEXT, self.rect, 2)
         
-        # 2. Header
+        # 2. Header (Session HUD)
         pygame.draw.rect(screen, (240, 240, 240), (self.rect.left, self.rect.top, self.rect.width, self.header_h))
         pygame.draw.line(screen, C_NB_TEXT, (self.rect.left, self.rect.top + self.header_h), (self.rect.right, self.rect.top + self.header_h), 2)
         
+        # Title
         title = self.assets.font_ui.render("LABORATORY NOTEBOOK", True, C_NB_TEXT)
-        screen.blit(title, (self.rect.centerx - title.get_width()//2, self.rect.top + 10))
+        screen.blit(title, (self.rect.centerx - title.get_width()//2, self.rect.top + 5))
         
+        # Stats
+        rtp, hit_rate, l10_rate = self._calculate_hud_stats()
+        
+        # Line 1: Hands | RTP
+        stats_font = self.assets.font_log_bold
+        line1_str = f"HANDS: {self.total_hands}   |   RTP: {rtp:.1f}%"
+        line1_surf = stats_font.render(line1_str, True, (80, 80, 80))
+        screen.blit(line1_surf, (self.rect.centerx - line1_surf.get_width()//2, self.rect.top + 30))
+        
+        # Line 2: Hit Rate | Last 10
+        hot_str = " 🔥" if l10_rate >= 50 else ""
+        line2_str = f"HIT RATE: {hit_rate:.0f}%   (L10: {l10_rate:.0f}%{hot_str})"
+        
+        # Color the L10 part if hot
+        line2_surf = stats_font.render(line2_str, True, (200, 0, 0) if l10_rate >= 50 else (80, 80, 80))
+        screen.blit(line2_surf, (self.rect.centerx - line2_surf.get_width()//2, self.rect.top + 50))
+
         # 3. Clipping Area
         clip_rect = pygame.Rect(self.rect.left, self.rect.top + self.header_h, self.rect.width, self.rect.height - self.header_h)
         original_clip = screen.get_clip()
@@ -242,11 +285,9 @@ class LogPanel:
         for i, log in enumerate(self.logs):
             y = start_y + (i * self.entry_height)
             
-            # Optimize drawing
             if y + self.entry_height < self.rect.top or y > self.rect.bottom:
                 continue
             
-            # Rule Line
             pygame.draw.line(screen, C_NB_LINES, (self.rect.left + 10, y + self.entry_height - 10), (self.rect.right - 20, y + self.entry_height - 10))
             
             # Line 1: ID + Result
@@ -264,12 +305,12 @@ class LogPanel:
             win_txt = self.assets.font_log_bold.render(win_str, True, win_col)
             screen.blit(win_txt, (self.rect.left + 70, y))
             
-            # Line 2: Deal (Highlighted)
+            # Line 2: Deal
             lbl_deal = self.assets.font_log.render("Deal:", True, C_NB_TEXT)
             screen.blit(lbl_deal, (self.rect.left + 15, y + 25))
             self.draw_cards_text(screen, log['deal'], self.rect.left + 70, y + 25, highlights=log['held_idx'])
             
-            # Line 3: Final (Highlighted!)
+            # Line 3: Final
             lbl_fin = self.assets.font_log.render("Final:", True, C_NB_TEXT)
             screen.blit(lbl_fin, (self.rect.left + 15, y + 50))
             self.draw_cards_text(screen, log['final'], self.rect.left + 70, y + 50, highlights=log['held_idx'])
@@ -279,10 +320,18 @@ class LogPanel:
             max_ev = log['ev']['max']
             diff = max_ev - user_ev
             
-            if diff < 0.025: # Slightly more tolerance for rounding (0.025 = 1/40th of a credit)
-                dec_txt = self.assets.font_log_bold.render(f"✅ Optimal (EV: {max_ev:.4f})", True, (0, 120, 0))
+            str_user = f"{user_ev:.2f}"
+            str_max = f"{max_ev:.2f}"
+            str_diff = f"{diff:.2f}"
+
+            if diff < 0.01: 
+                dec_txt = self.assets.font_log_bold.render(f"✅ Optimal ({str_user})", True, (0, 120, 0))
+            elif diff < 0.05:
+                msg = f"⚠️ Alternate (-{str_diff} EV)"
+                dec_txt = self.assets.font_log_bold.render(msg, True, (200, 140, 0))
             else:
-                dec_txt = self.assets.font_log_bold.render(f"❌ Error: -{diff:.4f} EV (Max: {max_ev:.4f})", True, C_NB_RED)
+                msg = f"❌ Error: -{str_diff} EV (Max: {str_max})"
+                dec_txt = self.assets.font_log_bold.render(msg, True, C_NB_RED)
                 
             screen.blit(dec_txt, (self.rect.left + 15, y + 75))
 
@@ -629,24 +678,30 @@ class IGT_Machine:
         elif self.state == "DECISION":
             self.advice_msg = None
             
-            # --- PERFORMANCE OPTIMIZATION: USE FAST SOLVER ---
-            optimal_hold, max_ev = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+            # 1. Get OPTIMAL MOVE (Instant, via Fast Solver)
+            optimal_hold, _ = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
             
+            # 2. Get OPTIMAL EV (Fast Calc via Exact Solver)
+            # We must map the card strings back to indices for the exact solver
+            opt_indices = [i for i, c in enumerate(self.hand) if c in optimal_hold]
+            max_ev = dw_exact_solver.calculate_exact_ev(self.hand, opt_indices, self.sim.paytable)
+            
+            # 3. Get USER EV
             user_hold_cards = [self.hand[i] for i in self.held_indices]
             
             if set(user_hold_cards) == set(optimal_hold):
-                user_ev = max_ev # Perfect play!
+                user_ev = max_ev # If you played perfect, you get max EV
             else:
                 user_ev = dw_exact_solver.calculate_exact_ev(self.hand, self.held_indices, self.sim.paytable)
             
-            # --- FIX: SCALE EV TO MAX BET ---
+            # Scale EV for Display
             max_ev_disp = max_ev * self.coins_bet
             user_ev_disp = user_ev * self.coins_bet
             
-            # Record current held indices for the log BEFORE replacing cards
+            # Record held indices BEFORE draw for log
             logged_held_indices = list(self.held_indices)
 
-            # 3. Process Draw
+            # 4. Process Draw
             self.core.shuffle(self.stub)
             for i in range(5):
                 if i not in self.held_indices:
@@ -662,6 +717,9 @@ class IGT_Machine:
             rank, mult = self.sim.evaluate_hand_score(self.hand)
             win_val = (mult * self.coins_bet) * self.denom
             
+            # Pass bet amount for RTP calculation (in dollars)
+            bet_val = (self.coins_bet * self.denom)
+
             if win_val > 0:
                 self.sound.play("win")
                 self.last_win_rank = rank
@@ -670,14 +728,15 @@ class IGT_Machine:
             else:
                 self.last_win_rank = None
                 
-            # --- LOG IT (With Scaled EV) ---
+            # --- LOG IT (With bet amount for stats) ---
             self.log_panel.add_entry(
                 self.hands_played,
                 self.deal_snapshot,
                 list(self.hand),
                 logged_held_indices,
                 {'user': user_ev_disp, 'max': max_ev_disp},
-                {'win': win_val, 'rank': rank.replace('_',' ')}
+                {'win': win_val, 'rank': rank.replace('_',' ')},
+                bet_val # New Argument
             )
             
             self.state = "IDLE"

@@ -1,342 +1,286 @@
 """
 dw_strategy_definitions.py
-STRATEGY REGISTRY (Phase 4 - Bonus Deuces 10/4/3/3 Finalized)
+STRATEGY REGISTRY (Variant-Aware)
 
-Contains the Ordered Priority Lists (Strategy Matrix) for Deuces Wild variants.
-AXIOM: The Engine iterates this list top-to-bottom. The first match wins.
+Contains the Atomic Rules and Priority Lists for Deuces Wild variants.
+Derived from Exact Math CSVs.
 """
 
-STRATEGY_MATRIX = {
-    # ==========================================
-    # 🦆 NSUD (16/10) - AGGRESSIVE
-    # Source: NSUD_Core_Strategy.txt
-    # ==========================================
-    "NSUD": {
-        4: [("HOLD_ALL", "HOLD")], 
-        
-        3: [
-            ("NATURAL_ROYAL", "HOLD"), 
-            ("WILD_ROYAL", "HOLD"),     
-            ("FIVE_OAK", "HOLD"),       
-            ("3_DEUCES", "HOLD_DEUCES")
-        ],
-        
-        2: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),     
-            ("FIVE_OAK", "HOLD"),       
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("MADE_4OAK", "HOLD"),      
-            ("4_TO_SF_TOUCHING", "DRAW_COMBINATION"), 
-            # TRAP: We BREAK Made Flush/Straight here by falling through to Deuces
-            ("2_DEUCES", "HOLD_DEUCES") 
-        ],
-        
-        1: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),     
-            ("FIVE_OAK", "HOLD"),       
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),     
-            ("MADE_STRAIGHT", "HOLD"),  
-            ("MADE_4OAK", "HOLD"),      
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), 
-            ("MADE_3OAK", "HOLD"),      
-            ("3_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"), 
-            ("1_DEUCE", "HOLD_DEUCES")  
-        ],
-        
-        0: [
-            ("NATURAL_ROYAL", "HOLD"),  
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("MADE_4OAK", "HOLD"),      
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),     
-            ("MADE_STRAIGHT", "HOLD"),  
-            ("MADE_3OAK", "HOLD"),      
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), 
-            ("3_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("4_TO_FLUSH", "DRAW_COMBINATION"), 
-            ("TWO_PAIR", "HOLD"),       
-            ("PAIR", "HOLD"),           
-            ("4_TO_STRAIGHT_OPEN", "DRAW_COMBINATION"), 
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"),    
-            ("DISCARD_ALL", "REDRAW")   
-        ]
-    },
+# ==============================================================================
+# 🧪 ATOMIC RULE FUNCTIONS (The Logic)
+# Each function takes (ranks, suits) and returns a list of held cards or None.
+# ==============================================================================
 
-    # ==========================================
-    # ✈️ AIRPORT (12/9) - DEFENSIVE
-    # Source: Airport_Deuces_Strategy.txt
-    # ==========================================
-    "AIRPORT": {
-        4: [("HOLD_ALL", "HOLD")], 
-        
-        3: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),     
-            ("FIVE_OAK", "HOLD"),       
-            ("3_DEUCES", "HOLD_DEUCES") 
-        ],
-        
-        2: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),     
-            ("FIVE_OAK", "HOLD"),       
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("MADE_4OAK", "HOLD"),      
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("4_TO_SF_TOUCHING", "DRAW_COMBINATION"), 
-            ("MADE_FLUSH", "HOLD"),     
-            ("2_DEUCES", "HOLD_DEUCES") 
-        ],
-        
-        1: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),     
-            ("FIVE_OAK", "HOLD"),       
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),     
-            ("MADE_4OAK", "HOLD"),      
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), 
-            ("MADE_3OAK", "HOLD"),      
-            ("MADE_STRAIGHT", "HOLD"),  
-            ("3_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("4_TO_STRAIGHT_OPEN", "DRAW_COMBINATION"), 
-            ("1_DEUCE", "HOLD_DEUCES")  
-        ],
-        
-        0: [
-            ("NATURAL_ROYAL", "HOLD"),  
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("STRAIGHT_FLUSH", "HOLD"), 
-            ("MADE_4OAK", "HOLD"),      
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),     
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), 
-            ("MADE_3OAK", "HOLD"),      
-            ("MADE_STRAIGHT", "HOLD"),  
-            ("3_TO_ROYAL", "DRAW_COMBINATION"), 
-            ("4_TO_STRAIGHT_OPEN", "DRAW_COMBINATION"), 
-            ("4_TO_FLUSH", "DRAW_COMBINATION"), 
-            ("TWO_PAIR", "HOLD"),       
-            ("PAIR", "HOLD"),           
-            ("DISCARD_ALL", "REDRAW")   
-        ]
-    },
-    
-    # ==========================================
-    # 💎 BONUS DEUCES (10/4/3/3)
-    # Generated from 10k Samples (v9.4 Engine)
-    # ==========================================
-    "BONUS_DEUCES_10_4": {
-        4: [
-            ("4_DEUCES_ACE", "HOLD_ALL"),       # EV 2000 > 1085
-            ("4_DEUCES", "HOLD_DEUCES")         # Break kicker (EV 1085)
-        ],
-        
-        3: [
-            ("FIVE_ACES", "HOLD"),              # EV 400 > 81
-            ("FIVE_3_4_5", "HOLD"),             # EV 200 > 81
-            ("WILD_ROYAL", "HOLD"),             # EV 125 > 81
-            ("FIVE_6_TO_K", "HOLD"),            # EV 100 > 81
-            ("3_DEUCES", "HOLD_DEUCES")         # EV 81.5
-        ],
-        
-        2: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("FIVE_ACES", "HOLD"),
-            ("FIVE_3_4_5", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_6_TO_K", "HOLD"),
-            ("STRAIGHT_FLUSH", "HOLD"),         # Pays 50 > 18.6
-            ("4_TO_ROYAL", "DRAW_COMBINATION"), # Natural 4-Royal EV ~98
-            ("2_DEUCES", "HOLD_DEUCES")         # EV 18.6 (Beats Pat Flush @ 15)
-        ],
-        
-        1: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("FIVE_ACES", "HOLD"),
-            ("FIVE_3_4_5", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_6_TO_K", "HOLD"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("MADE_FULL_HOUSE", "HOLD"),        # 15 > 4.73
-            ("MADE_FLUSH", "HOLD"),             # 15 > 4.73
-            ("MADE_3OAK", "HOLD"),              # 10-12 > 4.73 (Includes Pair+Deuce)
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"), # 11.1 > 4.73
-            ("MADE_STRAIGHT", "HOLD"),          # 5 > 4.73
-            ("4_TO_SF_GAP", "DRAW_COMBINATION"),  # 9.5 > 4.73
-            ("3_TO_ROYAL", "DRAW_COMBINATION"),   # 5.3 > 4.73
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"), # 4.9 > 4.73
-            ("4_TO_FLUSH", "DRAW_COMBINATION"),   # 4.87 > 4.73 (Aggressive!)
-            ("1_DEUCE", "HOLD_DEUCES")
-        ],
-        
-        0: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("MADE_4OAK", "HOLD"),
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),
-            ("MADE_3OAK", "HOLD"),
-            ("MADE_STRAIGHT", "HOLD"),
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"),
-            ("3_TO_ROYAL", "DRAW_COMBINATION"),
-            ("4_TO_SF_GAP", "DRAW_COMBINATION"),
-            ("4_TO_FLUSH", "DRAW_COMBINATION"),
-            ("PAIR", "HOLD"),                   # EV 2.7
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"), # 2.42 > 1.47
-            ("3_TO_SF_GAP", "DRAW_COMBINATION"),     # 2.04 > 1.47
-            ("3_TO_FLUSH", "DRAW_COMBINATION"),      # 1.67 > 1.47
-            ("2_TO_ROYAL", "DRAW_COMBINATION"),      # 1.56 > 1.47
-            ("DISCARD_ALL", "REDRAW")           # EV 1.47
-        ]
-    },
+def _get_cards(indices, original_hand):
+    return [original_hand[i] for i in indices]
 
-    # ==========================================
-    # 🎡 DBW (Hybrid) - FLUSH HATER
-    # Flush Pays 2. 5OAK Pays 16. SF Pays 13.
-    # Source: Logic Definitions
-    # ==========================================
-    "DBW": {
-        4: [("HOLD_ALL", "HOLD")],
-        3: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
-            ("3_DEUCES", "HOLD_DEUCES")
-        ],
-        2: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("MADE_4OAK", "HOLD"),
-            ("4_TO_SF_TOUCHING", "DRAW_COMBINATION"),
-            ("2_DEUCES", "HOLD_DEUCES")
-        ],
-        1: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"), 
-            ("MADE_STRAIGHT", "HOLD"),
-            ("MADE_4OAK", "HOLD"),
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"),
-            ("MADE_3OAK", "HOLD"),
-            ("3_TO_ROYAL", "DRAW_COMBINATION"),
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"), 
-            ("1_DEUCE", "HOLD_DEUCES")
-        ],
-        0: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("MADE_4OAK", "HOLD"),
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),
-            ("MADE_STRAIGHT", "HOLD"),
-            ("MADE_3OAK", "HOLD"),
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"),
-            ("3_TO_ROYAL", "DRAW_COMBINATION"),
-            ("TWO_PAIR", "HOLD"),
-            ("PAIR", "HOLD"),
-            ("4_TO_STRAIGHT_OPEN", "DRAW_COMBINATION"),
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"),
-            ("DISCARD_ALL", "REDRAW")
-        ]
-    },
+def holds_natural_royal(ranks, suits, hand):
+    if len(set(suits)) == 1: # Flush
+        if set(ranks) == {10, 11, 12, 13, 14}:
+            return hand # Hold All
+    return None
+
+def holds_4_deuces_ace(ranks, suits, hand):
+    if 14 in ranks: # Ace is 14
+        return hand
+    return None
+
+def holds_4_deuces(ranks, suits, hand):
+    deuce_indices = [i for i, r in enumerate(ranks) if r == 2]
+    return _get_cards(deuce_indices, hand)
+
+def holds_five_aces(ranks, suits, hand):
+    if ranks.count(14) == 4:
+        return hand
+    return None
+
+def holds_five_3_4_5(ranks, suits, hand):
+    non_2 = [r for r in ranks if r != 2]
+    if len(non_2) == 4 and len(set(non_2)) == 1:
+        if non_2[0] in [3, 4, 5]:
+            return hand
+    return None
+
+def holds_five_6_to_k(ranks, suits, hand):
+    non_2 = [r for r in ranks if r != 2]
+    if len(non_2) == 4 and len(set(non_2)) == 1:
+        if 6 <= non_2[0] <= 13:
+            return hand
+    return None
+
+def holds_wild_royal(ranks, suits, hand):
+    if len(set(suits)) == 1: # Flush
+        needed = {10, 11, 12, 13, 14}
+        current = set(ranks)
+        non_2 = current - {2}
+        if non_2.issubset(needed):
+            return hand
+    return None
+
+def holds_5_of_a_kind(ranks, suits, hand):
+    non_2 = [r for r in ranks if r != 2]
+    if not non_2: return hand # 5 Deuces
+    counts = {x: non_2.count(x) for x in non_2}
+    max_count = max(counts.values())
+    if max_count + ranks.count(2) == 5:
+        return hand
+    return None
+
+def holds_straight_flush(ranks, suits, hand):
+    if len(set(suits)) != 1: return None
     
-    # ==========================================
-    # 🎰 LOOSE DEUCES (2500 Coin Jackpot)
-    # The 4-Deuce Payout is the primary driver.
-    # ==========================================
-    "LOOSE_DEUCES": {
-        4: [("HOLD_ALL", "HOLD")],
-        3: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
-            ("3_DEUCES", "HOLD_DEUCES") 
-        ],
-        2: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("2_DEUCES", "HOLD_DEUCES") 
-        ],
-        1: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("WILD_ROYAL", "HOLD"),
-            ("FIVE_OAK", "HOLD"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),
-            ("MADE_STRAIGHT", "HOLD"),
-            ("MADE_4OAK", "HOLD"),
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"),
-            ("3_TO_ROYAL", "DRAW_COMBINATION"),
-            ("1_DEUCE", "HOLD_DEUCES")
-        ],
-        0: [
-            ("NATURAL_ROYAL", "HOLD"),
-            ("4_TO_ROYAL", "DRAW_COMBINATION"),
-            ("STRAIGHT_FLUSH", "HOLD"),
-            ("MADE_4OAK", "HOLD"),
-            ("MADE_FULL_HOUSE", "HOLD"),
-            ("MADE_FLUSH", "HOLD"),
-            ("MADE_STRAIGHT", "HOLD"),
-            ("MADE_3OAK", "HOLD"),
-            ("4_TO_SF_OPEN", "DRAW_COMBINATION"),
-            ("3_TO_ROYAL", "DRAW_COMBINATION"),
-            ("4_TO_FLUSH", "DRAW_COMBINATION"),
-            ("TWO_PAIR", "HOLD"),
-            ("PAIR", "HOLD"),
-            ("4_TO_STRAIGHT_OPEN", "DRAW_COMBINATION"),
-            ("3_TO_SF_CONNECT", "DRAW_COMBINATION"),
-            ("DISCARD_ALL", "REDRAW")
-        ]
-    }
+    non_2 = sorted([r for r in ranks if r != 2])
+    if not non_2: return hand 
+    
+    span = non_2[-1] - non_2[0]
+    
+    check_ranks = list(non_2)
+    if 14 in check_ranks: # Try Ace as 1
+        check_ranks_low = [1 if r==14 else r for r in check_ranks]
+        check_ranks_low.sort()
+        span_low = check_ranks_low[-1] - check_ranks_low[0]
+        if span_low <= 4 and len(set(check_ranks_low)) == len(check_ranks_low):
+             return hand
+             
+    if span <= 4 and len(set(non_2)) == len(non_2):
+        return hand
+        
+    return None
+
+def holds_4_of_a_kind(ranks, suits, hand):
+    for r in set(ranks):
+        if ranks.count(r) == 4:
+            indices = [i for i, x in enumerate(ranks) if x == r]
+            return _get_cards(indices, hand)
+    return None
+
+def holds_4_to_royal(ranks, suits, hand):
+    needed = {10, 11, 12, 13, 14}
+    deuces_indices = [i for i, r in enumerate(ranks) if r == 2]
+    num_deuces = len(deuces_indices)
+    
+    for s_char in 'shdc':
+        suit_indices = [i for i, (r, s) in enumerate(zip(ranks, suits)) if s == s_char and r != 2]
+        royal_indices = [i for i in suit_indices if ranks[i] in needed]
+        
+        if len(royal_indices) + num_deuces == 4:
+            return _get_cards(royal_indices + deuces_indices, hand)
+            
+    return None
+
+def holds_3_deuces(ranks, suits, hand):
+    deuce_indices = [i for i, r in enumerate(ranks) if r == 2]
+    return _get_cards(deuce_indices, hand)
+
+def holds_full_house(ranks, suits, hand):
+    counts = {r: ranks.count(r) for r in ranks}
+    if 2 in counts.values() and 3 in counts.values():
+        return hand
+    return None
+
+def holds_flush(ranks, suits, hand):
+    if len(set(suits)) == 1:
+        return hand
+    return None
+
+def holds_straight(ranks, suits, hand):
+    u_ranks = sorted(list(set(ranks)))
+    if len(u_ranks) != 5: return None
+    if u_ranks[-1] - u_ranks[0] == 4: return hand
+    if u_ranks == [2, 3, 4, 5, 14]: return hand
+    return None
+
+def holds_3_of_a_kind(ranks, suits, hand):
+    non_2 = [r for r in ranks if r != 2]
+    counts = {x: non_2.count(x) for x in non_2}
+    deuces = [i for i, r in enumerate(ranks) if r == 2]
+    num_deuces = len(deuces)
+    
+    for rank, count in counts.items():
+        if count + num_deuces == 3:
+            rank_indices = [i for i, r in enumerate(ranks) if r == rank]
+            return _get_cards(deuces + rank_indices, hand)
+    return None
+
+def holds_3_to_royal(ranks, suits, hand):
+    needed = {10, 11, 12, 13, 14}
+    deuces_indices = [i for i, r in enumerate(ranks) if r == 2]
+    num_deuces = len(deuces_indices)
+    
+    for s_char in 'shdc':
+        suit_indices = [i for i, (r, s) in enumerate(zip(ranks, suits)) if s == s_char and r != 2]
+        royal_indices = [i for i in suit_indices if ranks[i] in needed]
+        
+        if len(royal_indices) + num_deuces == 3:
+            return _get_cards(royal_indices + deuces_indices, hand)
+    return None
+
+def holds_high_pair(ranks, suits, hand):
+    # Only Jack, Queen, King, Ace
+    for r in [11, 12, 13, 14]:
+        indices = [i for i, x in enumerate(ranks) if x == r]
+        if len(indices) == 2:
+            return _get_cards(indices, hand)
+    return None
+
+def holds_any_pair(ranks, suits, hand):
+    # UPDATED: Smart Pair Logic for Bonus Deuces
+    # Prioritizes Bonus Pairs (Aces, 3, 4, 5) over others if multiple exist
+    
+    found_pairs = []
+    for r in set(ranks):
+        if r == 2: continue
+        indices = [i for i, x in enumerate(ranks) if x == r]
+        if len(indices) == 2:
+            found_pairs.append(r)
+            
+    if not found_pairs:
+        return None
+        
+    # If multiple pairs (Two Pair), pick the best one.
+    # Bonus Order: Aces(14) > 3,4,5 > 6-13
+    best_rank = found_pairs[0]
+    
+    def pair_value(r):
+        if r == 14: return 3 # Aces (80 payout)
+        if r in [3, 4, 5]: return 2 # Small Bonus (40 payout)
+        return 1 # Standard (20 payout)
+        
+    if len(found_pairs) > 1:
+        # Sort by value
+        found_pairs.sort(key=pair_value, reverse=True)
+        best_rank = found_pairs[0]
+        
+    indices = [i for i, x in enumerate(ranks) if x == best_rank]
+    return _get_cards(indices, hand)
+
+def holds_2_to_royal(ranks, suits, hand):
+    needed = {10, 11, 12, 13, 14}
+    for s_char in 'shdc':
+        indices = [i for i, (r, s) in enumerate(zip(ranks, suits)) if s == s_char and r in needed]
+        if len(indices) == 2:
+            return _get_cards(indices, hand)
+    return None
+
+def holds_4_to_straight_flush_conn(ranks, suits, hand):
+    for s_char in 'shdc':
+        indices = [i for i, (r, s) in enumerate(zip(ranks, suits)) if s == s_char and r != 2]
+        if len(indices) == 4:
+            vals = sorted([ranks[i] for i in indices])
+            if vals[-1] - vals[0] == 3:
+                return _get_cards(indices, hand)
+    return None
+
+def holds_2_deuces(ranks, suits, hand):
+    deuce_indices = [i for i, r in enumerate(ranks) if r == 2]
+    if len(deuce_indices) == 2:
+        return _get_cards(deuce_indices, hand)
+    return None
+
+def holds_1_deuce(ranks, suits, hand):
+    deuce_indices = [i for i, r in enumerate(ranks) if r == 2]
+    if len(deuce_indices) == 1:
+        return _get_cards(deuce_indices, hand)
+    return None
+
+def discard_all(ranks, suits, hand):
+    return [] 
+
+# ==============================================================================
+# 📋 STRATEGY PLAYLISTS (The Recipes)
+# ==============================================================================
+
+STRATEGY_BONUS_DEUCES = {
+    4: [holds_natural_royal, holds_4_deuces_ace, holds_4_deuces],
+    3: [holds_natural_royal, holds_wild_royal, holds_five_aces, holds_five_3_4_5, holds_five_6_to_k, holds_3_deuces],
+    2: [holds_natural_royal, holds_wild_royal, holds_five_aces, holds_five_3_4_5, holds_five_6_to_k, holds_straight_flush, holds_4_to_royal, holds_2_deuces],
+    1: [holds_natural_royal, holds_wild_royal, holds_five_aces, holds_five_3_4_5, holds_five_6_to_k, holds_straight_flush, holds_4_to_royal, holds_full_house, holds_3_of_a_kind, holds_flush, holds_straight, holds_3_to_royal, holds_4_to_straight_flush_conn, holds_1_deuce],
+    0: [
+        holds_natural_royal,
+        holds_4_to_royal, 
+        holds_straight_flush,
+        holds_5_of_a_kind, 
+        holds_4_of_a_kind,
+        holds_full_house,
+        holds_flush,
+        holds_straight,
+        holds_3_of_a_kind,
+        holds_4_to_straight_flush_conn,
+        holds_3_to_royal,
+        # FIXED: Now uses any_pair instead of high_pair
+        holds_any_pair, 
+        holds_2_to_royal,  
+        discard_all
+    ]
 }
 
-# ==========================================
-# ⚙️ GENERATOR CONFIGURATION
-# Input definitions for dw_strategy_generator.py
-# ==========================================
-GAME_VARIANTS = {
-    "BONUS_DEUCES_10_4": {
-        "name": "Bonus Deuces Wild (10/4/3/3)",
-        "paytable": {
-            "NATURAL_ROYAL": 800,    # Standard 800 (4000 total)
-            "FOUR_DEUCES_ACE": 400,  # 2000 total
-            "FOUR_DEUCES": 200,      # 1000 total
-            "FIVE_ACES": 80,         # 400 total
-            "FIVE_3_4_5": 40,        # 200 total (The Critical Differentiator)
-            "FIVE_6_TO_K": 20,       # 100 total (Explicit Key)
-            "WILD_ROYAL": 25,        # 125 total
-            "STRAIGHT_FLUSH": 10,    # 50 total
-            "FOUR_OAK": 4,           # 20 total
-            "FULL_HOUSE": 3,         # 15 total
-            "FLUSH": 3,              # 15 total
-            "STRAIGHT": 1,           # 5 total
-            "THREE_OAK": 1           # 5 total
-        }
-    }
+STRATEGY_NSUD = {
+    4: [holds_4_deuces],
+    3: [holds_wild_royal, holds_5_of_a_kind, holds_3_deuces],
+    2: [holds_wild_royal, holds_5_of_a_kind, holds_straight_flush, holds_4_to_royal, holds_2_deuces],
+    1: [holds_wild_royal, holds_5_of_a_kind, holds_straight_flush, holds_4_to_royal, holds_full_house, holds_3_of_a_kind, holds_flush, holds_straight, holds_3_to_royal, holds_1_deuce],
+    0: [
+        holds_natural_royal, 
+        holds_4_to_royal, 
+        holds_straight_flush, 
+        holds_4_of_a_kind,
+        holds_full_house, 
+        holds_flush, 
+        holds_straight, 
+        holds_3_of_a_kind, 
+        holds_4_to_straight_flush_conn, 
+        holds_3_to_royal, 
+        holds_2_to_royal, # NSUD keeps Royal priority
+        holds_high_pair,  # NSUD only holds Jacks+
+        discard_all
+    ]
+}
+
+# ==============================================================================
+# 🗺️ MASTER STRATEGY MAP
+# ==============================================================================
+STRATEGY_MAP = {
+    "NSUD": STRATEGY_NSUD,
+    "BONUS_DEUCES_10_4": STRATEGY_BONUS_DEUCES,
+    "DEUCES_WILD": STRATEGY_NSUD 
 }
