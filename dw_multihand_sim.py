@@ -3,6 +3,8 @@ import random
 import os
 import datetime
 from collections import Counter
+
+# --- CORE ENGINES ---
 from dw_sim_engine import DeucesWildSim
 from dw_pay_constants import PAYTABLES 
 
@@ -10,6 +12,15 @@ from dw_pay_constants import PAYTABLES
 from dw_logger import SessionLogger
 from dw_protocol_guardian import ProtocolGuardian
 from dw_bot_amy import AmyBot
+
+# --- STRATEGY ENGINE (The New Brain) ---
+# We use Fast Solver for batch runs because it's instant and matches the Trainer.
+try:
+    import dw_fast_solver
+    FAST_SOLVER_AVAILABLE = True
+except ImportError:
+    FAST_SOLVER_AVAILABLE = False
+    print("⚠️ Warning: 'dw_fast_solver.py' not found. Simulation will be slow.")
 
 # ---------------------------------------------------------
 # 📊 OPTIONAL MODULES
@@ -31,10 +42,10 @@ except ImportError:
 # 🧬 CONFIGURATION & DEFAULTS
 # ==========================================
 DEFAULT_LINES = 5
-DEFAULT_VARIANT = "NSUD" 
-DEFAULT_START_BANKROLL = 40.00
-DEFAULT_FLOOR = 70.00
-DEFAULT_CEILING = 120.00
+DEFAULT_VARIANT = "BONUS_DEUCES_10_4"  # UPDATED to match Trainer
+DEFAULT_START_BANKROLL = 100.00        # UPDATED to match Trainer
+DEFAULT_FLOOR = 50.00                  # 50% Stop Loss
+DEFAULT_CEILING = 200.00               # Double Up Target
 LOGGING_ENABLED = True
 
 AMY_MODE_DEFAULT = False
@@ -47,10 +58,17 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     hand = sim.normalize_input(hand_str)
     if len(hand) != 5: return 0.0, {}
 
-    held_cards = sim.pro_strategy(hand)
+    # --- STRATEGY STEP (UPGRADED) ---
+    # Use Fast Solver (New Brain) if available, otherwise fallback to Sim's default
+    if FAST_SOLVER_AVAILABLE:
+        held_cards, _ = dw_fast_solver.solve_hand(hand, sim.paytable)
+    else:
+        held_cards = sim.pro_strategy(hand) # Slower
+
     action_display = "Redraw" if len(held_cards) == 0 else ("Held All" if len(held_cards) == 5 else "Hold")
     held_display = " ".join(held_cards)
     
+    # Calculate EV (Optional - can be disabled for raw speed)
     ev_val = 0.0
     if EV_AVAILABLE:
         try:
@@ -59,6 +77,7 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
             ev_val = dw_exact_solver.calculate_exact_ev(hand, hold_indices, pt)
         except: pass
 
+    # Wheel Mechanic
     wheel_mult = 1
     w1 = 1; w2 = 1
     wheel_str = ""
@@ -66,15 +85,25 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
         wheel_mult, w1, w2 = sim.wheel.spin()
         if wheel_mult > 1: wheel_str = f" ({w1}x{w2}={wheel_mult}x) 🔥"
 
-    full_deck = sim.core.get_fresh_deck()
-    dealt_set = set(hand)
-    if not dealt_set.issubset(set(full_deck)): return 0.0, {}
-    stub = [c for c in full_deck if c not in dealt_set]
-    final_hands = sim.core.draw_from_stub(held_cards, stub, num_lines=num_lines)
+    # --- PHYSICS (FIXED: Using Validated Core API) ---
+    # 1. Get Fresh Deck
+    full_deck = sim.core.get_fresh_deck() 
     
+    # 2. Create Stub (Filter out dealt cards)
+    dealt_set = set(hand)
+    stub = [c for c in full_deck if c not in dealt_set]
+    
+    # 3. Draw using draw_from_stub (Handles shuffling & multi-line cloning internally)
+    # This aligns perfectly with the validated dw_core_engine.py
+    final_hands = sim.core.draw_from_stub(held_cards, stub, num_lines=num_lines)
+
+    # Scoring
     total_winnings = 0.0
-    base_bet = sim.bet_amount
-    cost = (base_bet * 2) if wheel_active else base_bet
+    base_bet = sim.bet_amount # This is typically 5 * denom
+    # Adjust if sim.bet_amount is calculated differently in your engine
+    # Let's enforce standard 5-coin bet per line logic:
+    bet_per_line = 5 * denom
+    cost = (bet_per_line * 2) if wheel_active else bet_per_line
     total_bet = cost * num_lines
     lines_won = 0
     results = []
@@ -82,20 +111,20 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     for fh in final_hands:
         rank_name, mult = sim.evaluate_hand_score(fh)
         if mult > 0: lines_won += 1
-        total_winnings += (mult * base_bet) * wheel_mult
+        total_winnings += (mult * bet_per_line) * wheel_mult # Payout is on the base bet
         results.append(rank_name)
 
     net_result = total_winnings - total_bet
     counts = Counter(results)
     
-    # --- UPDATE: Add the Bonus Deuces specific keys here ---
+    # --- BONUS DEUCES REPORTING ---
     interests = [
         "NATURAL_ROYAL", 
-        "FOUR_DEUCES_ACE",  # New Jackpot
+        "FOUR_DEUCES_ACE", 
         "FOUR_DEUCES", 
-        "FIVE_ACES",        # New Jackpot
-        "FIVE_3_4_5",       # New Jackpot
-        "FIVE_6_TO_K",      # New Payout
+        "FIVE_ACES", 
+        "FIVE_3_4_5", 
+        "FIVE_6_TO_K", 
         "WILD_ROYAL", 
         "FIVE_OAK", 
         "STRAIGHT_FLUSH", 
@@ -144,7 +173,7 @@ def run_interactive_coach(variant, denom, wheel_active):
     
     if EV_AVAILABLE:
         print("🤔 Analyzing probabilities...")
-        pt = dw_exact_solver.PAYTABLES[variant]
+        pt = dw_exact_solver.PAYTABLES.get(variant, dw_exact_solver.PAYTABLES["NSUD"])
         user_indices = [i for i, c in enumerate(hand) if c in user_hold]
         user_ev = dw_exact_solver.calculate_exact_ev(hand, user_indices, pt)
         best_hold, max_ev = dw_exact_solver.solve_hand_silent(hand, pt)
@@ -160,7 +189,7 @@ def run_interactive_coach(variant, denom, wheel_active):
             print(f"❌ MISTAKE DETECTED")
             print(f"   You Held:  {u_str:<15} (EV: {user_ev:.4f})")
             print(f"   Optimal:   {b_str:<15} (EV: {max_ev:.4f})")
-            cost_money = diff * denom * (2 if wheel_active else 1)
+            cost_money = diff * denom * (2 if wheel_active else 1) * 5 # EV is per coin, bet is 5 coins
             print(f"   Real Cost: -${cost_money:.2f} (per hand)")
         print("-" * 40)
         input("Press Enter to continue...")
@@ -172,7 +201,7 @@ def run_interactive_coach(variant, denom, wheel_active):
 # ==========================================
 if __name__ == "__main__":
     print("==========================================")
-    print("🧬 MULTI-HAND SIMULATOR (v7.2 - MICROSERVICE)")
+    print("🧬 MULTI-HAND SIMULATOR (v7.4 - GOLDEN CORE)")
     print("==========================================")
     
     variant = DEFAULT_VARIANT
@@ -321,5 +350,5 @@ if __name__ == "__main__":
                     if logger:
                         logger.close()
                         if PLOT_TOOLS_AVAILABLE:
-                            generate_mission_control_plot(logger.get_filepath(), floor=floor, ceiling=ceiling)
+                            generate_mission_control_plot(logger.filepath, floor=floor, ceiling=ceiling, show_plot=False)
             print("🏁 Batch Complete.")
