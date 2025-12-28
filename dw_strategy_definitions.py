@@ -309,11 +309,11 @@ STRATEGY_BONUS_DEUCES_10_4 = {
         holds_4_deuces,
     ],
     3: [
-        holds_five_aces,
-        holds_five_3_4_5,
-        holds_wild_royal,
-        holds_five_6_to_k,
-        holds_3_deuces,
+        holds_five_aces,    # EV 400
+        holds_five_3_4_5,   # EV 200
+        holds_wild_royal,   # EV 125 (Confirmed > 3 Deuces)
+        holds_five_6_to_k,  # EV 100
+        holds_3_deuces,     # EV ~90.7
     ],
     2: [
         holds_five_aces,
@@ -323,7 +323,7 @@ STRATEGY_BONUS_DEUCES_10_4 = {
         holds_straight_flush,
         holds_4_to_royal,
         holds_4_to_straight_flush_conn,
-        holds_2_deuces,
+        holds_2_deuces,     # EV ~21.79
     ],
     1: [
         holds_five_aces,
@@ -334,11 +334,11 @@ STRATEGY_BONUS_DEUCES_10_4 = {
         holds_4_to_royal,
         holds_full_house,
         holds_4_to_straight_flush_conn,
-        holds_flush,            # Pays 3 (Keep > Pair)
-        holds_3_to_royal,       # Pays 25 for WR (Keep > Pair)
-        holds_3_of_a_kind,      # MOVED UP: Deuce + Pair (EV ~1.86)
-        holds_straight,         # Pays 1 (EV 1.0) -> Break Straight to hold Pair!
-        holds_3_to_straight_flush_conn, # EV ~1.45
+        holds_flush,            # Pays 3 (EV ~15)
+        holds_3_to_straight_flush_conn, # EV ~21 (Conn) / ~18 (Gap) -> Better than 3OAK
+        holds_3_to_royal,       # EV ~18.3 -> Better than 3OAK
+        holds_3_of_a_kind,      # EV ~10.4 (Deuce + Pair) -> Beats Straight
+        holds_straight,         # Pays 1 (EV 5.0) -> Break Straight to hold Pair+Deuce!
         holds_1_deuce,
     ],
     0: [
@@ -351,9 +351,10 @@ STRATEGY_BONUS_DEUCES_10_4 = {
         holds_3_of_a_kind,
         holds_4_to_straight_flush_conn,
         holds_3_to_royal,
-        holds_any_pair,
+        holds_4_to_flush,   # EV 3.86 (Prioritized over Pair)
+        holds_any_pair,     # EV 2.71
         holds_2_to_royal,
-        discard_all,
+        discard_all,        # EV 1.55 (Sniper rules omitted per instruction)
     ],
 }
 # <<<< STRATEGY_BONUS_DEUCES_10_4_END
