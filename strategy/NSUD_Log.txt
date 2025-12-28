@@ -1,0 +1,50 @@
+==========================================
+🧬 STRATEGY DISCOVERY ENGINE (v9.4)
+==========================================
+[Config: NSUD | 10000 Hands | 16 Cores]
+1. 🚀 Run Generation
+2. ⚙️  Settings
+3. 🚪 Quit
+>> 1
+
+🚀 LAUNCHING SOLVER SESSION
+   Target:  NSUD
+   New Run: 10000 Hands
+   Workers: 16
+--------------------------------------------------
+🌟 Seeding 9 'Golden Hands' (Jackpots & Rare Events)...
+   [Progress] 10000/10000 (100%) | 6.9 hands/sec...
+✅ Finished in 1457.17 seconds
+-----------------------------------------------------------------
+🏆 STRATEGY CHART: NSUD
+RANK  | CATEGORY LABEL            | AVG EV     | SAMPLES
+-----------------------------------------------------------------
+1     | NATURAL_ROYAL             | 4000.0000  | 1    
+2     | 4_DEUCES                  | 1000.0000  | 3    
+3     | WILD_ROYAL                | 125.0000   | 2    
+4     | 4_ROYAL                   | 98.9894    | 4    
+5     | FIVE_6_TO_K               | 80.0000    | 2
+6     | FIVE_3_4_5                | 80.0000    | 1
+7     | 3_DEUCES                  | 79.9617    | 11
+8     | PAT_FLUSH_OR_STR_FLUSH    | 53.0769    | 26
+9     | 1_DEUCE_3_SF_CONN         | 22.8085    | 15
+10    | 2_DEUCES                  | 20.8529    | 363
+11    | 1_DEUCE_3_ROYAL           | 19.1078    | 31
+12    | 1_DEUCE_3_SF_GAP          | 18.5759    | 88
+13    | 4_STR_FLUSH_CONN          | 15.6560    | 6
+14    | 1_DEUCE_3_FLUSH           | 14.6809    | 2
+15    | PAT_STRAIGHT_OR_FULL_HOUSE | 12.7320    | 194
+16    | 3_KIND                    | 9.8952     | 1102
+17    | 4_STR_FLUSH_GAP           | 9.5181     | 17
+18    | 3_ACES                    | 9.4403     | 13
+19    | 3_3_4_5                   | 9.4403     | 47
+20    | 1_DEUCE_2_SF_CONN         | 7.2261     | 206
+21    | 3_ROYAL                   | 6.9359     | 134
+22    | 1_DEUCE_2_SF_GAP          | 6.7911     | 195
+23    | 1_DEUCE_2_ROYAL           | 6.3853     | 199
+24    | 1_DEUCE_2_FLUSH           | 5.8844     | 264
+25    | 1_DEUCE_GENERIC           | 5.4170     | 845
+
+💾 Report saved: strategy/strategy_NSUD_20251228_000748.csv
+
+Press Enter...
