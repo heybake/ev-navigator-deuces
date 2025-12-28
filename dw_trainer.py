@@ -4,9 +4,10 @@ import sys
 import math
 # Ensure dw_sim_engine.py is in the same directory or python path
 import dw_sim_engine
-# Import solvers
+# Import solvers and definitions
 import dw_fast_solver
-import dw_exact_solver 
+import dw_exact_solver
+import dw_strategy_definitions 
 from dw_pay_constants import PAYTABLES
 
 # ==============================================================================
@@ -102,7 +103,7 @@ class AssetManager:
         self.font_msg = pygame.font.SysFont("Arial", 24, bold=True)
         self.font_log_bold = pygame.font.SysFont("Segoe UI Symbol", 16, bold=True)
         self.font_log = pygame.font.SysFont("Segoe UI Symbol", 16)
-        self.font_tiny = pygame.font.SysFont("Arial", 12)
+        self.font_tiny = pygame.font.SysFont("Arial", 13) # Slightly larger for readability
         self.font_menu_title = pygame.font.SysFont("Arial Black", 24)
         self.font_menu_item = pygame.font.SysFont("Arial Narrow", 22, bold=True)
         self._load_textures()
@@ -141,6 +142,188 @@ class AssetManager:
             s.fill((0, 50, 200))
             pygame.draw.rect(s, C_WHITE, (5,5,130,200), 2)
             self.back = s
+
+# ==============================================================================
+# 🧠 STRATEGY PANEL (THE TACTICAL HUD)
+# ==============================================================================
+class StrategyPanel:
+    def __init__(self, x, y, w, h, assets, machine):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.assets = assets
+        self.machine = machine
+        self.active_info = None # Holds match_info from solver
+
+    def set_state(self, match_info):
+        self.active_info = match_info
+
+    def draw(self, screen):
+        # Draw Background
+        pygame.draw.rect(screen, (30, 35, 40), self.rect)
+        pygame.draw.line(screen, (100,100,100), (self.rect.right,0), (self.rect.right,SCREEN_H), 2)
+
+        if not self.active_info:
+            # Fallback if no state (shouldn't happen in Decision mode)
+            return
+
+        bucket_idx = self.active_info['bucket']
+        match_idx = self.active_info['rule_idx']
+        
+        # 1. Header
+        header_rect = pygame.Rect(self.rect.left, self.rect.top, self.rect.width, 60)
+        pygame.draw.rect(screen, (20, 25, 30), header_rect)
+        pygame.draw.line(screen, (100, 100, 100), (self.rect.left, self.rect.top+60), (self.rect.right, self.rect.top+60), 2)
+        
+        title_str = f"{bucket_idx} DEUCE STRATEGY"
+        title = self.assets.font_ui.render(title_str, True, C_YEL_TEXT)
+        screen.blit(title, title.get_rect(center=header_rect.center))
+
+        # 2. Strategy List
+        variant = self.machine.sim.variant
+        # Fallback to NSUD map if variant not explicitly found (handled in strategy defs)
+        strat_map = dw_strategy_definitions.STRATEGY_MAP.get(variant, dw_strategy_definitions.STRATEGY_NSUD)
+        rules = strat_map.get(bucket_idx, [])
+
+        # Scroll logic: Keep matched rule in the middle
+        max_items = 25
+        start_idx = max(0, match_idx - 6)
+        end_idx = min(len(rules), start_idx + max_items)
+        
+        y = self.rect.top + 80
+        x_off = self.rect.left + 20
+
+        for i in range(start_idx, end_idx):
+            rule_func = rules[i]
+            name = dw_strategy_definitions.get_pretty_name(rule_func)
+            
+            # Color Logic
+            if i < match_idx:
+                col = (100, 100, 100) # Dimmed (Failed Check)
+                prefix = "x "
+            elif i == match_idx:
+                col = C_DIGITAL_GRN   # Bright Green (Match)
+                prefix = "► "
+            else:
+                col = (180, 180, 180) # Normal (Lower Priority)
+                prefix = "  "
+            
+            # Highlight Bar for Match
+            if i == match_idx:
+                bar_rect = pygame.Rect(self.rect.left, y - 2, self.rect.width, 20)
+                pygame.draw.rect(screen, (40, 60, 40), bar_rect)
+
+            txt = self.assets.font_tiny.render(f"{prefix}{name}", True, col)
+            screen.blit(txt, (x_off, y))
+            y += 22
+
+# ==============================================================================
+# 📖 CODEX SCREEN (STRATEGY LIBRARY)
+# ==============================================================================
+class CodexScreen:
+    def __init__(self, rect, assets, machine):
+        self.rect = rect
+        self.assets = assets
+        self.machine = machine
+        self.active_bucket = 0
+        self.buttons = []
+        self._init_tabs()
+
+    def _init_tabs(self):
+        # Create tabs for 0, 1, 2, 3, 4 Deuces
+        tab_w = 120
+        start_x = self.rect.centerx - (2.5 * tab_w)
+        y = self.rect.top + 80
+        
+        for i in range(5):
+            self.buttons.append({
+                "rect": pygame.Rect(start_x + (i * tab_w), y, tab_w, 40),
+                "label": f"{i} DEUCES",
+                "val": i,
+                "action": lambda v=i: self._set_bucket(v)
+            })
+            
+        # Close Button
+        self.buttons.append({
+            "rect": pygame.Rect(self.rect.centerx - 60, self.rect.bottom - 80, 120, 50),
+            "label": "CLOSE",
+            "action": self._close,
+            "col": C_DIGITAL_RED
+        })
+
+    def _set_bucket(self, val):
+        self.active_bucket = val
+        self.machine.sound.play("bet")
+
+    def _close(self):
+        self.machine.state = "IDLE"
+        self.machine.sound.play("bet")
+
+    def handle_click(self, pos):
+        for btn in self.buttons:
+            if btn["rect"].collidepoint(pos):
+                btn["action"]()
+                return
+
+    def draw(self, screen):
+        # Overlay Background
+        s = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        s.fill((0, 0, 0, 220)) # Dark transparent
+        screen.blit(s, (0,0))
+        
+        # Main Panel
+        panel_rect = self.rect.inflate(-100, -100)
+        pygame.draw.rect(screen, C_PANEL_BG, panel_rect, border_radius=12)
+        pygame.draw.rect(screen, C_IGT_GOLD, panel_rect, 3, border_radius=12)
+        
+        # Header
+        title = self.assets.font_vfd.render("STRATEGY CODEX", True, C_IGT_GOLD)
+        screen.blit(title, title.get_rect(center=(self.rect.centerx, self.rect.top + 50)))
+        
+        # Tabs
+        mouse_pos = pygame.mouse.get_pos()
+        for btn in self.buttons:
+            r = btn["rect"]
+            hover = r.collidepoint(mouse_pos)
+            is_active = (btn.get("val") == self.active_bucket)
+            
+            col = btn.get("col", C_BTN_FACE)
+            if is_active: col = C_IGT_TXT_SEL
+            elif hover: col = (200, 200, 255)
+            
+            pygame.draw.rect(screen, col, r, border_radius=6)
+            pygame.draw.rect(screen, C_BLACK, r, 2, border_radius=6)
+            
+            txt_col = C_BLACK
+            txt = self.assets.font_ui.render(btn["label"], True, txt_col)
+            screen.blit(txt, txt.get_rect(center=r.center))
+
+        # Content Area
+        content_rect = pygame.Rect(panel_rect.left + 40, panel_rect.top + 140, panel_rect.width - 80, panel_rect.height - 200)
+        pygame.draw.rect(screen, (20, 25, 30), content_rect, border_radius=8)
+        
+        # Render Rules
+        variant = self.machine.sim.variant
+        strat_map = dw_strategy_definitions.STRATEGY_MAP.get(variant, dw_strategy_definitions.STRATEGY_NSUD)
+        rules = strat_map.get(self.active_bucket, [])
+        
+        # Split into 2 columns if list is long
+        col_limit = 15
+        col1_x = content_rect.left + 40
+        col2_x = content_rect.centerx + 40
+        start_y = content_rect.top + 30
+        
+        for i, rule in enumerate(rules):
+            name = dw_strategy_definitions.get_pretty_name(rule)
+            
+            if i < col_limit:
+                x = col1_x; y = start_y + (i * 30)
+            else:
+                x = col2_x; y = start_y + ((i - col_limit) * 30)
+            
+            rank_txt = self.assets.font_ui.render(f"{i+1}.", True, C_IGT_GOLD)
+            screen.blit(rank_txt, (x, y))
+            
+            rule_txt = self.assets.font_ui.render(name, True, C_WHITE)
+            screen.blit(rule_txt, (x + 40, y))
 
 # ==============================================================================
 # 🎮 SESSION SETUP SCREEN (THE WIZARD)
@@ -852,7 +1035,7 @@ class IGT_Machine:
     def __init__(self):
         pygame.init(); pygame.mixer.init(); os.environ['SDL_VIDEO_CENTERED'] = '1'
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer (Mission Control)")
+        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer (v8.0)")
         self.clock = pygame.time.Clock()
         self.assets = AssetManager(); self.sound = SoundManager()
         self.available_variants = list(PAYTABLES.keys()); self.variant_idx = 0 
@@ -871,6 +1054,10 @@ class IGT_Machine:
         self.graph_panel = GraphPanel(1240, 530, 340, 300, self.assets.font_tiny)
         self.config_panel = ConfigPanel(0, 0, 240, 850, self.assets, self)
         
+        # NEW V8.0 PANELS
+        self.strategy_panel = StrategyPanel(0, 0, 240, 850, self.assets, self)
+        self.codex_screen = CodexScreen(pygame.Rect(240, 0, 1360, 850), self.assets, self)
+        
         # 3. Overlays
         self.game_selector = GameSelectorScreen(pygame.Rect(240, 0, 1360, 850), self.assets, self, self.available_variants)
         self.session_setup = SessionSetupScreen(pygame.Rect(240, 0, 1360, 850), self.assets, self)
@@ -880,7 +1067,7 @@ class IGT_Machine:
         
         self.auto_hold_active = False; self.auto_play_active = False; self.last_action_time = 0; self.advice_msg = None        
         self.hands_played = 0; self._init_buttons(); self._init_meters(); 
-        self.vol_btn = VolumeButton(1150, 785, self.sound)
+        self.vol_btn = VolumeButton(1200, 785, self.sound) # <--- MOVED RIGHT
         
         self.config_panel.update_machine_limits()
 
@@ -888,14 +1075,15 @@ class IGT_Machine:
         y = 780; h = 50
         start_x = 340
         self.buttons = [
-            PhysicalButton((start_x, y, 120, h), "MORE GAMES", self.act_open_menu),
-            PhysicalButton((start_x + 130, y, 90, h), "AUTO HOLD", self.act_toggle_auto_hold, color=C_DIGITAL_YEL),
-            PhysicalButton((start_x + 230, y, 110, h), "AUTO PLAY", self.act_toggle_auto_play, color=C_BTN_FACE),
-            PhysicalButton((start_x + 350, y, 90, h), "BET ONE", self.act_bet_one),
-            PhysicalButton((start_x + 450, y, 90, h), "BET MAX", self.act_bet_max),
-            PhysicalButton((start_x + 600, y, 150, h), "DEAL", self.act_deal_draw, color=(255, 215, 0))
+            PhysicalButton((start_x, y, 100, h), "STRATEGY", self.act_open_codex, color=(200, 200, 255)),
+            PhysicalButton((start_x + 110, y, 100, h), "MORE GAMES", self.act_open_menu),
+            PhysicalButton((start_x + 220, y, 90, h), "AUTO HOLD", self.act_toggle_auto_hold, color=C_DIGITAL_YEL),
+            PhysicalButton((start_x + 320, y, 110, h), "AUTO PLAY", self.act_toggle_auto_play, color=C_BTN_FACE),
+            PhysicalButton((start_x + 440, y, 90, h), "BET ONE", self.act_bet_one),
+            PhysicalButton((start_x + 540, y, 90, h), "BET MAX", self.act_bet_max),
+            PhysicalButton((start_x + 690, y, 150, h), "DEAL", self.act_deal_draw, color=(255, 215, 0))
         ]
-        self.btn_auto_hold = self.buttons[1]; self.btn_auto_play = self.buttons[2]; self.btn_deal = self.buttons[-1]
+        self.btn_auto_hold = self.buttons[2]; self.btn_auto_play = self.buttons[3]; self.btn_deal = self.buttons[-1]
 
     def _init_meters(self):
         self.meter_win = ClickableMeter(400, 680, "WIN", C_DIGITAL_RED)
@@ -916,7 +1104,14 @@ class IGT_Machine:
         if self.auto_play_active: self.last_action_time = pygame.time.get_ticks()
 
     def run_solver(self):
-        best_cards, _ = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+        # Updated to handle 3 return values
+        res = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+        if len(res) == 3:
+            best_cards, _, match_info = res
+            if match_info: self.strategy_panel.set_state(match_info)
+        else:
+            best_cards, _ = res # Legacy safety
+            
         self.held_indices = []
         for i, card in enumerate(self.hand):
             is_best = card in best_cards
@@ -937,6 +1132,11 @@ class IGT_Machine:
             self.session_setup.temp_denom = self.denom
             self.session_setup.temp_floor_pct = self.config_panel.floor_pct
             self.session_setup.temp_ceil_pct = self.config_panel.ceil_pct
+            self.sound.play("bet")
+            
+    def act_open_codex(self):
+        if self.state == "IDLE":
+            self.state = "CODEX"
             self.sound.play("bet")
 
     def act_select_game(self, new_variant):
@@ -986,11 +1186,27 @@ class IGT_Machine:
             if mult > 0: self.last_win_rank = rank
             
             self.sound.play("deal"); self.state = "DECISION"; self.btn_deal.text = "DRAW"
+            
+            # --- AUTO-SOLVE FOR HUD ---
+            # Even if not auto-holding, we run the solver to populate the Strategy Panel
+            # This allows the user to see the rules immediately.
+            res = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+            if len(res) == 3:
+                _, _, match_info = res
+                if match_info: self.strategy_panel.set_state(match_info)
+            
             if self.auto_hold_active or self.auto_play_active: self.run_solver()
             
         elif self.state == "DECISION":
             self.advice_msg = None
-            optimal_hold, _ = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+            
+            # Solver Call (Handle 2 or 3 return values safely)
+            solver_res = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
+            if len(solver_res) == 3:
+                optimal_hold, _, _ = solver_res
+            else:
+                optimal_hold, _ = solver_res
+                
             opt_indices = [i for i, c in enumerate(self.hand) if c in optimal_hold]
             max_ev = dw_exact_solver.calculate_exact_ev(self.hand, opt_indices, self.sim.paytable)
             user_hold_cards = [self.hand[i] for i in self.held_indices]
@@ -998,8 +1214,6 @@ class IGT_Machine:
             else: user_ev = dw_exact_solver.calculate_exact_ev(self.hand, self.held_indices, self.sim.paytable)
             
             # --- FIXED: NORMALIZE EV SCALING ---
-            # Solver returns EV based on 5 coins (Standard).
-            # We must normalize to 1 coin, then multiply by actual bet.
             max_ev_disp = (max_ev / 5) * self.coins_bet
             user_ev_disp = (user_ev / 5) * self.coins_bet
             logged_held_indices = list(self.held_indices)
@@ -1025,15 +1239,20 @@ class IGT_Machine:
             self.state = "IDLE"; self.btn_deal.text = "DEAL"
 
     def handle_click(self, pos):
-        # 1. Config Panel Clicks
-        if self.config_panel.rect.collidepoint(pos):
-            if self.config_panel.btn_setup.rect.collidepoint(pos):
-                self.config_panel.btn_setup.callback()
-            return
-
+        # 1. Config/Strategy Panel Clicks
+        # If in DECISION mode, the Strategy Panel is visible instead of Config
+        # But Config panel rect is at (0,0), same as Strategy.
+        # Strategy Panel is read-only for clicks unless we add interactivity later.
+        if self.state == "IDLE":
+            if self.config_panel.rect.collidepoint(pos):
+                if self.config_panel.btn_setup.rect.collidepoint(pos):
+                    self.config_panel.btn_setup.callback()
+                return
+        
         # 2. Overlays
         if self.state == "GAME_SELECT": self.game_selector.handle_click(pos); return
         if self.state == "SESSION_SETUP": self.session_setup.handle_click(pos); return
+        if self.state == "CODEX": self.codex_screen.handle_click(pos); return
 
         # 3. SYNC INTERACTION
         clicked_hand_id = self.graph_panel.handle_click(pos)
@@ -1066,54 +1285,65 @@ class IGT_Machine:
     def draw(self):
         self.screen.fill(C_BLACK)
         
-        self.config_panel.draw(self.screen)
+        # LEFT PANEL LOGIC
+        if self.state == "DECISION":
+            self.strategy_panel.draw(self.screen)
+        else:
+            self.config_panel.draw(self.screen)
+            
         self.log_panel.draw(self.screen)
-        
-        # Graph draws own view
         self.graph_panel.draw(self.screen)
         
+        # OVERLAYS
         if self.state == "GAME_SELECT":
             self.game_selector.draw(self.screen)
         elif self.state == "SESSION_SETUP":
             self.session_setup.draw(self.screen)
+        elif self.state == "CODEX":
+            # Draw main game first as background, then overlay
+            self._draw_main_game_elements()
+            self.codex_screen.draw(self.screen)
         else:
-            self.paytable.draw(self.screen, self.coins_bet, self.last_win_rank)
-            
-            off_x = 240; game_w = 1000
-            pygame.draw.rect(self.screen, C_BG_BLUE, (off_x, 380, game_w, 280))
-            pygame.draw.line(self.screen, C_WHITE, (off_x, 380), (off_x+game_w, 380), 2)
-            pygame.draw.line(self.screen, C_WHITE, (off_x, 660), (off_x+game_w, 660), 2)
-            
-            self.vol_btn.draw(self.screen)
-            if self.advice_msg:
-                msg = self.assets.font_msg.render(self.advice_msg, True, C_CYAN_MSG)
-                center_x = 240 + (1000 // 2) 
-                bg = msg.get_rect(center=(center_x, 395)).inflate(20, 10)
-                pygame.draw.rect(self.screen, (0,0,50), bg, border_radius=5)
-                pygame.draw.rect(self.screen, C_CYAN_MSG, bg, 2, border_radius=5)
-                self.screen.blit(msg, msg.get_rect(center=(center_x, 395)))
-                
-            if self.auto_play_active: self.screen.blit(self.assets.font_ui.render("PILOT ENGAGED", True, C_DIGITAL_GRN), (300+off_x, 835))
-            self.screen.blit(self.assets.font_lbl.render(f"DEALS: {self.hands_played}", True, C_YEL_TEXT), (30+off_x, 750))
-            self.screen.blit(self.assets.font_ui.render(f"Deuces Wild ({self.sim.variant})", True, C_WHITE), (20+off_x, 835))
-
-            for c in self.cards: c.draw(self.screen)
-            if self.win_display < self.win_target: self.win_display += self.denom; self.win_display = min(self.win_display, self.win_target)
-            
-            for m in self.meters:
-                val = self.win_display if m.label == "WIN" else (self.coins_bet * self.denom if m.label == "BET" else self.bankroll)
-                m.draw(self.screen, self.assets, val, self.denom)
-            
-            cx, cy = 910, 680 + 30; rect = pygame.Rect(cx-40, cy-25, 80, 50)
-            pygame.draw.ellipse(self.screen, (255, 215, 0), rect); pygame.draw.ellipse(self.screen, C_BLACK, rect, 2)
-            txt_str = f"{int(self.denom*100)}¢" if self.denom < 1.0 else f"${int(self.denom)}"
-            txt = pygame.font.SysFont("timesnewroman", 28, bold=True).render(txt_str, True, (200, 0, 0))
-            self.screen.blit(txt, txt.get_rect(center=(cx, cy)))
-
-            mouse_pos = pygame.mouse.get_pos(); mouse_down = pygame.mouse.get_pressed()[0]
-            for b in self.buttons: b.update(mouse_pos, mouse_down); b.draw(self.screen, self.assets.font_ui)
+            self._draw_main_game_elements()
             
         pygame.display.flip()
+
+    def _draw_main_game_elements(self):
+        self.paytable.draw(self.screen, self.coins_bet, self.last_win_rank)
+        
+        off_x = 240; game_w = 1000
+        pygame.draw.rect(self.screen, C_BG_BLUE, (off_x, 380, game_w, 280))
+        pygame.draw.line(self.screen, C_WHITE, (off_x, 380), (off_x+game_w, 380), 2)
+        pygame.draw.line(self.screen, C_WHITE, (off_x, 660), (off_x+game_w, 660), 2)
+        
+        self.vol_btn.draw(self.screen)
+        if self.advice_msg:
+            msg = self.assets.font_msg.render(self.advice_msg, True, C_CYAN_MSG)
+            center_x = 240 + (1000 // 2) 
+            bg = msg.get_rect(center=(center_x, 395)).inflate(20, 10)
+            pygame.draw.rect(self.screen, (0,0,50), bg, border_radius=5)
+            pygame.draw.rect(self.screen, C_CYAN_MSG, bg, 2, border_radius=5)
+            self.screen.blit(msg, msg.get_rect(center=(center_x, 395)))
+            
+        if self.auto_play_active: self.screen.blit(self.assets.font_ui.render("PILOT ENGAGED", True, C_DIGITAL_GRN), (300+off_x, 835))
+        self.screen.blit(self.assets.font_lbl.render(f"DEALS: {self.hands_played}", True, C_YEL_TEXT), (30+off_x, 750))
+        self.screen.blit(self.assets.font_ui.render(f"Deuces Wild ({self.sim.variant})", True, C_WHITE), (20+off_x, 835))
+
+        for c in self.cards: c.draw(self.screen)
+        if self.win_display < self.win_target: self.win_display += self.denom; self.win_display = min(self.win_display, self.win_target)
+        
+        for m in self.meters:
+            val = self.win_display if m.label == "WIN" else (self.coins_bet * self.denom if m.label == "BET" else self.bankroll)
+            m.draw(self.screen, self.assets, val, self.denom)
+        
+        cx, cy = 910, 680 + 30; rect = pygame.Rect(cx-40, cy-25, 80, 50)
+        pygame.draw.ellipse(self.screen, (255, 215, 0), rect); pygame.draw.ellipse(self.screen, C_BLACK, rect, 2)
+        txt_str = f"{int(self.denom*100)}¢" if self.denom < 1.0 else f"${int(self.denom)}"
+        txt = pygame.font.SysFont("timesnewroman", 28, bold=True).render(txt_str, True, (200, 0, 0))
+        self.screen.blit(txt, txt.get_rect(center=(cx, cy)))
+
+        mouse_pos = pygame.mouse.get_pos(); mouse_down = pygame.mouse.get_pressed()[0]
+        for b in self.buttons: b.update(mouse_pos, mouse_down); b.draw(self.screen, self.assets.font_ui)
 
     def run(self):
         running = True
@@ -1127,7 +1357,7 @@ class IGT_Machine:
                 elif event.type in [pygame.MOUSEWHEEL, pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN]:
                     self.log_panel.handle_event(event)
                 elif event.type == pygame.KEYUP:
-                    if self.state in ["GAME_SELECT", "SESSION_SETUP"]: continue
+                    if self.state in ["GAME_SELECT", "SESSION_SETUP", "CODEX"]: continue
                     if event.key == pygame.K_a: self.act_toggle_auto_hold()
                     elif event.key == pygame.K_p: self.act_toggle_auto_play()
                     elif event.key == pygame.K_SPACE: self.act_deal_draw()

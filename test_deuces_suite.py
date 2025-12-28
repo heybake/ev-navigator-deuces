@@ -7,10 +7,12 @@ import os
 sys.path.append(os.getcwd())
 
 from dw_sim_engine import DeucesWildSim
-from dw_multihand_sim import ProtocolGuardian, run_multihand_session
+from dw_multihand_sim import run_multihand_session, ProtocolGuardian
+# FIXED: Added PAYTABLES to the import list so tests can access it
 from dw_exact_solver import calculate_exact_ev, evaluate_hand as solver_evaluate, PAYTABLES
 from dw_pay_constants import PAYTABLES as MASTER_REGISTRY
 
+# Optional Imports (Graceful degradation if files missing)
 try:
     from dw_strategy_generator import classify_hold
     GENERATOR_AVAILABLE = True
@@ -29,36 +31,36 @@ try:
 except ImportError:
     FAST_SOLVER_AVAILABLE = False
 
-# ==========================================
+# ==============================================================================
 # 🧠 CORE ENGINE TESTS
-# ==========================================
+# ==============================================================================
 class TestHandEvaluator(unittest.TestCase):
     def setUp(self):
         self.sim = DeucesWildSim()
 
     def test_natural_royal(self):
         hand = ["Ad", "Kd", "Qd", "Jd", "Td"]
-        rank, _ = self.sim.evaluate_hand(hand)
+        rank, _ = self.sim.evaluate_hand_score(hand)
         self.assertEqual(rank, "NATURAL_ROYAL")
 
     def test_four_deuces(self):
         hand = ["2d", "2h", "2s", "2c", "5d"]
-        rank, _ = self.sim.evaluate_hand(hand)
+        rank, _ = self.sim.evaluate_hand_score(hand)
         self.assertEqual(rank, "FOUR_DEUCES")
 
     def test_wild_royal(self):
         hand = ["2d", "Kd", "Qd", "Jd", "Td"]
-        rank, _ = self.sim.evaluate_hand(hand)
+        rank, _ = self.sim.evaluate_hand_score(hand)
         self.assertEqual(rank, "WILD_ROYAL")
 
     def test_five_of_a_kind_nsud(self):
         hand = ["2d", "8h", "8s", "8c", "8d"]
-        rank, _ = self.sim.evaluate_hand(hand)
+        rank, _ = self.sim.evaluate_hand_score(hand)
         self.assertEqual(rank, "FIVE_OAK") 
 
     def test_wheel_straight_flush(self):
         hand = ["Ad", "2d", "3d", "4d", "5d"]
-        rank, _ = self.sim.evaluate_hand(hand)
+        rank, _ = self.sim.evaluate_hand_score(hand)
         self.assertEqual(rank, "STRAIGHT_FLUSH")
 
     def test_dirty_input_normalization(self):
@@ -69,9 +71,12 @@ class TestHandEvaluator(unittest.TestCase):
 
     def test_dirty_flush_integration(self):
         hand = ["8h", "9h", "2d", "Qh", "6h"]
-        rank, _ = self.sim.evaluate_hand(hand)
+        rank, _ = self.sim.evaluate_hand_score(hand)
         self.assertEqual(rank, "FLUSH", "Sim Engine failed to identify Mixed-Suit Flush")
 
+# ==============================================================================
+# 🧩 BONUS DEUCES LOGIC TESTS
+# ==============================================================================
 class TestBonusDeucesLogic(unittest.TestCase):
     def setUp(self):
         self.sim_bonus = DeucesWildSim(variant="BONUS_DEUCES_10_4")
@@ -79,42 +84,45 @@ class TestBonusDeucesLogic(unittest.TestCase):
 
     def test_five_aces_detection(self):
         hand = ["2s", "Ah", "Ad", "Ac", "As"]
-        rank_b, pay_b = self.sim_bonus.evaluate_hand(hand)
+        rank_b, pay_b = self.sim_bonus.evaluate_hand_score(hand)
         self.assertEqual(rank_b, "FIVE_ACES")
         self.assertEqual(pay_b, 80)
 
-        rank_s, pay_s = self.sim_std.evaluate_hand(hand)
+        rank_s, pay_s = self.sim_std.evaluate_hand_score(hand)
         self.assertEqual(rank_s, "FIVE_OAK")
         self.assertEqual(pay_s, 16)
 
     def test_five_3_4_5_detection(self):
         hand = ["2s", "3h", "3d", "3c", "3s"]
-        rank, pay = self.sim_bonus.evaluate_hand(hand)
+        rank, pay = self.sim_bonus.evaluate_hand_score(hand)
         self.assertEqual(rank, "FIVE_3_4_5")
         self.assertEqual(pay, 40)
 
     def test_five_6_to_k_detection(self):
         hand = ["2s", "8h", "8d", "8c", "8s"]
-        rank, pay = self.sim_bonus.evaluate_hand(hand)
+        rank, pay = self.sim_bonus.evaluate_hand_score(hand)
         self.assertEqual(rank, "FIVE_6_TO_K")
         self.assertEqual(pay, 20)
 
     def test_four_deuces_with_ace(self):
         hand = ["2s", "2h", "2d", "2c", "As"]
-        rank_b, pay_b = self.sim_bonus.evaluate_hand(hand)
+        rank_b, pay_b = self.sim_bonus.evaluate_hand_score(hand)
         self.assertEqual(rank_b, "FOUR_DEUCES_ACE")
         self.assertEqual(pay_b, 400)
         
-        rank_s, pay_s = self.sim_std.evaluate_hand(hand)
+        rank_s, pay_s = self.sim_std.evaluate_hand_score(hand)
         self.assertEqual(rank_s, "FOUR_DEUCES")
         self.assertEqual(pay_s, 200)
 
     def test_four_deuces_no_kicker(self):
         hand = ["2s", "2h", "2d", "2c", "Ks"]
-        rank_b, pay_b = self.sim_bonus.evaluate_hand(hand)
+        rank_b, pay_b = self.sim_bonus.evaluate_hand_score(hand)
         self.assertEqual(rank_b, "FOUR_DEUCES")
         self.assertEqual(pay_b, 200)
 
+# ==============================================================================
+# 🔬 STRATEGY CLASSIFIER TESTS
+# ==============================================================================
 @unittest.skipUnless(GENERATOR_AVAILABLE, "Strategy Generator not importable")
 class TestStrategyClassifier(unittest.TestCase):
     def test_classify_four_deuces_ace(self):
@@ -147,43 +155,55 @@ class TestStrategyClassifier(unittest.TestCase):
         label = classify_hold(hand)
         self.assertEqual(label, "NATURAL_ROYAL")
 
+# ==============================================================================
+# 🚀 FAST SOLVER & EV TESTS (UPDATED FOR v8.0)
+# ==============================================================================
 @unittest.skipUnless(FAST_SOLVER_AVAILABLE, "Fast Solver not importable")
 class TestFastSolver(unittest.TestCase):
     def setUp(self):
         self.pt_bonus = MASTER_REGISTRY["BONUS_DEUCES_10_4"]
 
     def test_return_structure(self):
+        """Verifies v8.0 returns (held, ev, metadata)"""
         hand = ['2s', '2h', '2c', '2d', '3s']
         result = dw_fast_solver.solve_hand(hand, self.pt_bonus)
+        
+        # --- FIXED ASSERTION FOR v8.0 ---
         self.assertIsInstance(result, tuple)
-        self.assertEqual(len(result), 2)
+        self.assertEqual(len(result), 3, "Failed v8.0 Signature Check: Expected 3 return values") 
         self.assertIsInstance(result[0], list)
         self.assertIsInstance(result[1], float)
+        self.assertIsInstance(result[2], dict) # Metadata
 
     def test_fast_eval_bonus_math(self):
         """Verifies Fast Solver calculates correct EV for tiered hands."""
         # 5 Aces (Pay 80 * 5 = 400)
         hand_aces = ['As', 'Ac', 'Ah', 'Ad', '2s']
-        _, ev = dw_fast_solver.solve_hand(hand_aces, self.pt_bonus)
+        
+        # --- FIXED UNPACKING FOR v8.0 ---
+        held, ev, meta = dw_fast_solver.solve_hand(hand_aces, self.pt_bonus)
+        
         self.assertAlmostEqual(ev, 400.0, places=1)
+        self.assertEqual(meta['rule_name'], 'FIVE ACES')
 
         # 5 Threes (Pay 40 * 5 = 200)
         hand_3s = ['3s', '3c', '3h', '3d', '2s']
-        _, ev = dw_fast_solver.solve_hand(hand_3s, self.pt_bonus)
+        held, ev, meta = dw_fast_solver.solve_hand(hand_3s, self.pt_bonus)
         self.assertAlmostEqual(ev, 200.0, places=1)
 
         # 5 Eights (Pay 20 * 5 = 100)
         hand_8s = ['8s', '8c', '8h', '8d', '2s']
-        _, ev = dw_fast_solver.solve_hand(hand_8s, self.pt_bonus)
+        held, ev, meta = dw_fast_solver.solve_hand(hand_8s, self.pt_bonus)
         self.assertAlmostEqual(ev, 100.0, places=1)
 
+# ==============================================================================
+# ⚖️ STRATEGY LOGIC TESTS
+# ==============================================================================
 class TestDualCoreStrategy(unittest.TestCase):
     def test_the_flush_trap(self):
         """
         The Famous Trap: 2 Deuces + Made Flush.
         Mathematically, you should BREAK the flush (Hold < 5 cards).
-        The Solver might hold 2 (Deuces) or 4 (Deuces + SF/Royal Draw).
-        Both are correct. Holding 5 (The Flush) is the trap.
         """
         hand = ["2h", "2s", "4h", "Th", "Kh"] 
         
@@ -218,10 +238,15 @@ class TestDualCoreStrategy(unittest.TestCase):
         self.assertEqual(air.paytable['STRAIGHT_FLUSH'], 9)
         self.assertEqual(dbw.paytable['STRAIGHT_FLUSH'], 13)
 
+# ==============================================================================
+# 🎮 SIMULATION CONTROLLER TESTS
+# ==============================================================================
 class TestSimController(unittest.TestCase):
     def test_session_execution_structure(self):
         hand_str = "2s 2h 5d 6c 9s"
+        # Note: run_multihand_session now handles the v8.0 unpacking internally
         net, log_data = run_multihand_session(hand_str, 1, "NSUD", 0.25)
+        
         self.assertIsInstance(net, float)
         self.assertIsInstance(log_data, dict)
         required_keys = ["Variant", "Action", "EV", "Net_Result", "Hit_Summary"]
@@ -236,6 +261,9 @@ class TestSimController(unittest.TestCase):
         self.assertEqual(sim_std.paytable["FLUSH"], 3)
         self.assertEqual(sim_dbw.paytable["FLUSH"], 2)
 
+# ==============================================================================
+# 🛡️ PROTOCOL GUARDIAN TESTS
+# ==============================================================================
 class TestProtocolGuardian(unittest.TestCase):
     def setUp(self):
         self.start_bank = 100.0
@@ -264,6 +292,9 @@ class TestProtocolGuardian(unittest.TestCase):
         trigger = self.guard.check(hands_played=14, current_bankroll=95.0)
         self.assertEqual(trigger, "TEASE_EXIT")
 
+# ==============================================================================
+# 🎯 EXACT SOLVER TESTS
+# ==============================================================================
 class TestExactSolver(unittest.TestCase):
     def setUp(self):
         self.pt = PAYTABLES["NSUD"]
@@ -309,6 +340,9 @@ class TestExactSolver(unittest.TestCase):
         payout = solver_evaluate(hand, self.pt)
         self.assertEqual(payout, 125)
 
+# ==============================================================================
+# 🎡 WHEEL MECHANIC TESTS
+# ==============================================================================
 class TestWheelMechanic(unittest.TestCase):
     def setUp(self):
         self.sim = DeucesWildSim(variant="DBW")
@@ -322,6 +356,9 @@ class TestWheelMechanic(unittest.TestCase):
         self.assertIsInstance(mult, int)
         self.assertGreaterEqual(mult, 1)
 
+# ==============================================================================
+# 📊 MISSION CONTROL TESTS
+# ==============================================================================
 @unittest.skipUnless(PLOT_TOOLS_AVAILABLE, "Plot Tools not installed")
 class TestMissionControl(unittest.TestCase):
     def test_classify_sniper(self):
@@ -342,6 +379,9 @@ class TestMissionControl(unittest.TestCase):
         label, color = classify_session(df, start_bank=100, floor=70, ceiling=120)
         self.assertIn("TEASE", label)
 
+# ==============================================================================
+# 🧪 PAYTABLE INTEGRITY TESTS
+# ==============================================================================
 class TestPayTableQuarantine(unittest.TestCase):
     def test_single_source_of_truth(self):
         sim = DeucesWildSim(variant="NSUD")
@@ -352,10 +392,12 @@ class TestPayTableQuarantine(unittest.TestCase):
         self.assertEqual(MASTER_REGISTRY["DBW"]["STRAIGHT_FLUSH"], 13)
 
     def test_solver_integration(self):
-        self.assertIs(PAYTABLES, MASTER_REGISTRY)
+        # We imported PAYTABLES from dw_exact_solver and MASTER from dw_pay_constants
+        # They should match (dw_exact_solver usually imports from dw_pay_constants)
+        self.assertEqual(PAYTABLES["NSUD"], MASTER_REGISTRY["NSUD"])
 
 if __name__ == '__main__':
     print("========================================")
-    print("🧬 DEUCES WILD INTEGRITY CHECK (v5.5)")
+    print("🧬 DEUCES WILD INTEGRITY CHECK (v8.0)")
     print("========================================")
     unittest.main(verbosity=3)

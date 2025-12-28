@@ -9,12 +9,25 @@ from dw_sim_engine import DeucesWildSim
 from dw_pay_constants import PAYTABLES 
 
 # --- MODULE IMPORTS (The Micro-Services) ---
-from dw_logger import SessionLogger
-from dw_protocol_guardian import ProtocolGuardian
-from dw_bot_amy import AmyBot
+try:
+    from dw_logger import SessionLogger
+    LOGGER_AVAILABLE = True
+except ImportError:
+    LOGGER_AVAILABLE = False
+
+try:
+    from dw_protocol_guardian import ProtocolGuardian
+    GUARDIAN_AVAILABLE = True
+except ImportError:
+    GUARDIAN_AVAILABLE = False
+
+try:
+    from dw_bot_amy import AmyBot
+    AMY_AVAILABLE = True
+except ImportError:
+    AMY_AVAILABLE = False
 
 # --- STRATEGY ENGINE (The New Brain) ---
-# We use Fast Solver for batch runs because it's instant and matches the Trainer.
 try:
     import dw_fast_solver
     FAST_SOLVER_AVAILABLE = True
@@ -61,7 +74,12 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     # --- STRATEGY STEP (UPGRADED) ---
     # Use Fast Solver (New Brain) if available, otherwise fallback to Sim's default
     if FAST_SOLVER_AVAILABLE:
-        held_cards, _ = dw_fast_solver.solve_hand(hand, sim.paytable)
+        # PATCH v8.0: Handle 3-value return (held, ev, metadata)
+        res = dw_fast_solver.solve_hand(hand, sim.paytable)
+        if len(res) == 3:
+            held_cards, _, _ = res # Ignore EV/Meta for speed in batch mode
+        else:
+            held_cards, _ = res    # Legacy fallback
     else:
         held_cards = sim.pro_strategy(hand) # Slower
 
@@ -94,14 +112,10 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     stub = [c for c in full_deck if c not in dealt_set]
     
     # 3. Draw using draw_from_stub (Handles shuffling & multi-line cloning internally)
-    # This aligns perfectly with the validated dw_core_engine.py
     final_hands = sim.core.draw_from_stub(held_cards, stub, num_lines=num_lines)
 
     # Scoring
     total_winnings = 0.0
-    base_bet = sim.bet_amount # This is typically 5 * denom
-    # Adjust if sim.bet_amount is calculated differently in your engine
-    # Let's enforce standard 5-coin bet per line logic:
     bet_per_line = 5 * denom
     cost = (bet_per_line * 2) if wheel_active else bet_per_line
     total_bet = cost * num_lines
@@ -119,18 +133,9 @@ def run_multihand_session(hand_str, num_lines, variant, denom, wheel_active=Fals
     
     # --- BONUS DEUCES REPORTING ---
     interests = [
-        "NATURAL_ROYAL", 
-        "FOUR_DEUCES_ACE", 
-        "FOUR_DEUCES", 
-        "FIVE_ACES", 
-        "FIVE_3_4_5", 
-        "FIVE_6_TO_K", 
-        "WILD_ROYAL", 
-        "FIVE_OAK", 
-        "STRAIGHT_FLUSH", 
-        "FOUR_OAK", 
-        "FULL_HOUSE", 
-        "FLUSH"
+        "NATURAL_ROYAL", "FOUR_DEUCES_ACE", "FOUR_DEUCES", "FIVE_ACES", 
+        "FIVE_3_4_5", "FIVE_6_TO_K", "WILD_ROYAL", "FIVE_OAK", 
+        "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH"
     ]
     
     top_hits = [f"{k.replace('_',' ').title()}({v})" for k,v in counts.items() if k in interests and v > 0]
@@ -176,6 +181,8 @@ def run_interactive_coach(variant, denom, wheel_active):
         pt = dw_exact_solver.PAYTABLES.get(variant, dw_exact_solver.PAYTABLES["NSUD"])
         user_indices = [i for i, c in enumerate(hand) if c in user_hold]
         user_ev = dw_exact_solver.calculate_exact_ev(hand, user_indices, pt)
+        
+        # NOTE: Using silent solver which still returns 2 vals (safe)
         best_hold, max_ev = dw_exact_solver.solve_hand_silent(hand, pt)
         
         diff = max_ev - user_ev
@@ -189,7 +196,7 @@ def run_interactive_coach(variant, denom, wheel_active):
             print(f"❌ MISTAKE DETECTED")
             print(f"   You Held:  {u_str:<15} (EV: {user_ev:.4f})")
             print(f"   Optimal:   {b_str:<15} (EV: {max_ev:.4f})")
-            cost_money = diff * denom * (2 if wheel_active else 1) * 5 # EV is per coin, bet is 5 coins
+            cost_money = diff * denom * (2 if wheel_active else 1) * 5 
             print(f"   Real Cost: -${cost_money:.2f} (per hand)")
         print("-" * 40)
         input("Press Enter to continue...")
@@ -201,7 +208,7 @@ def run_interactive_coach(variant, denom, wheel_active):
 # ==========================================
 if __name__ == "__main__":
     print("==========================================")
-    print("🧬 MULTI-HAND SIMULATOR (v7.4 - GOLDEN CORE)")
+    print("🧬 MULTI-HAND SIMULATOR (v7.5 - GOLDEN CLI)")
     print("==========================================")
     
     variant = DEFAULT_VARIANT
@@ -303,7 +310,7 @@ if __name__ == "__main__":
                 hands_played = 0
                 
                 # --- INSTANTIATE AGENTS ---
-                guardian = ProtocolGuardian(start_bank) if protocol_mode else None
+                guardian = ProtocolGuardian(floor, ceiling) if protocol_mode else None
                 amy_bot = AmyBot(amy_ladder, lines) if amy_mode else None
                 logger = SessionLogger(variant, amy_mode, protocol_mode, session_idx) if logging_on else None
                 

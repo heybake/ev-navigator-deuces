@@ -1,8 +1,10 @@
 """
 dw_fast_solver.py
-High-Performance Logic Engine (v6.2 - Auto-Detect)
+High-Performance Logic Engine (v8.0 - Strategy Viz)
 
-Now features "Paytable Fingerprinting" to ensure the Strategy matches the Machine.
+Features:
+- Auto-Detects Variant.
+- Returns Metadata about *which* rule triggered the hold.
 """
 import dw_strategy_definitions
 from dw_strategy_definitions import STRATEGY_MAP
@@ -48,11 +50,9 @@ def solve_hand(hand, paytable_dict=None):
     Determines the best hold for a given hand and its EV.
     Auto-detects variant to prevent Strategy Mismatches.
     
-    :param hand: List of strings ['2h', 'Ad', ...]
-    :param paytable_dict: Used to identify variant and calc EV.
-    :return: (best_hold_cards, calculated_ev)
+    Returns: (held_cards, ev, match_info)
     """
-    # 1. Detect Variant from Paytable Signature (ROBUST FIX)
+    # 1. Detect Variant from Paytable Signature
     variant_name = _detect_variant(paytable_dict)
     
     # 2. Load Strategy Playlist
@@ -68,12 +68,10 @@ def solve_hand(hand, paytable_dict=None):
     bucket_rules = strategy.get(num_deuces, [])
     
     # 5. Iterate Rules (The "Playlist")
-    for rule_func in bucket_rules:
+    for index, rule_func in enumerate(bucket_rules):
         held_cards = rule_func(ranks, suits, clean_hand)
         
         if held_cards is not None:
-            # We found the best move according to the Playlist.
-            # Now we calculate its exact EV for reporting.
             try:
                 # Map held strings back to indices for the exact solver
                 hold_indices = []
@@ -85,15 +83,29 @@ def solve_hand(hand, paytable_dict=None):
                         temp_hand[idx] = "USED" 
                 
                 ev = calculate_exact_ev(clean_hand, hold_indices, paytable_dict)
-                return held_cards, ev
+                
+                # METADATA FOR UI
+                match_info = {
+                    "bucket": num_deuces,
+                    "rule_idx": index,
+                    "rule_name": dw_strategy_definitions.get_pretty_name(rule_func),
+                    "total_rules": len(bucket_rules)
+                }
+                
+                return held_cards, ev, match_info
                 
             except Exception:
-                return held_cards, 0.0
+                return held_cards, 0.0, None
             
     # Fallback (Discard All)
-    # This acts as the "Zero Deuces" bottom catch-all if not defined
     try:
         ev = calculate_exact_ev(clean_hand, [], paytable_dict)
-        return [], ev
+        match_info = {
+            "bucket": num_deuces,
+            "rule_idx": len(bucket_rules) - 1, # Assume discard is last
+            "rule_name": "DISCARD ALL",
+            "total_rules": len(bucket_rules)
+        }
+        return [], ev, match_info
     except:
-        return [], 0.0
+        return [], 0.0, None
