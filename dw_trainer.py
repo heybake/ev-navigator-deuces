@@ -1187,6 +1187,9 @@ class IGT_Machine:
             
             self.sound.play("deal"); self.state = "DECISION"; self.btn_deal.text = "DRAW"
             
+            # CRITICAL FIX: Clear the old strategy state immediately to prevent "Ghost Buckets"
+            self.strategy_panel.active_info = None
+
             # --- AUTO-SOLVE FOR HUD ---
             # Even if not auto-holding, we run the solver to populate the Strategy Panel
             # This allows the user to see the rules immediately.
