@@ -98,3 +98,79 @@ Sit back and watch the console. You are looking for **"WIN"** (Doubled to $20k) 
 * **The "Broken" Signal:** If sessions end in **< 500 hands** consistently, the strategy is "leaking" money (making mistakes).
 
 **Run it now!** Let me know if you see any "WIN" sessions or if it puts up a good fight!
+
+
+----------------------
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces> python dw_batch_analyzer.py
+🔍 INITIALIZING BATCH ANALYSIS...
+   Target Directory: ./logs
+   Found 786 session logs. Processing...
+------------------------------------------------------------
+❌ Error reading session_BONUS_DEUCES_10_4_S786_20251227_210542.csv: No columns to parse from file
+
+============================================================
+📊 FORENSIC REPORT: DEUCES WILD ENGINE
+============================================================
+📂 Sessions Analyzed:  786
+🃏 Total Hands Dealt:  119,128
+💰 Total Coin-In:      $59,564,000.00
+💸 Total Coin-Out:     $53,067,395.00
+============================================================
+📂 Sessions Analyzed:  786
+🃏 Total Hands Dealt:  119,128
+💰 Total Coin-In:      $59,564,000.00
+============================================================
+📂 Sessions Analyzed:  786
+🃏 Total Hands Dealt:  119,128
+============================================================
+📂 Sessions Analyzed:  786
+============================================================
+============================================================
+📂 Sessions Analyzed:  786
+============================================================
+============================================================
+📂 Sessions Analyzed:  786
+============================================================
+============================================================
+============================================================
+📂 Sessions Analyzed:  786
+============================================================
+============================================================
+📂 Sessions Analyzed:  786
+🃏 Total Hands Dealt:  119,128
+💰 Total Coin-In:      $59,564,000.00
+💸 Total Coin-Out:     $53,067,395.00
+------------------------------------------------------------
+📈 GLOBAL RTP:         89.0931%
+📐 Theoretical RTP:    99.4500%
+🎯 Deviation:          -10.3569%
+------------------------------------------------------------
+🏆 PERFORMANCE OUTCOMES
+   WIN (Doubled Up):   57  (7.3%)
+   BUST (Ruined):      728  (92.6%)
+   ALIVE (Grinding):   0  (0.0%)
+============================================================
+❌ VERDICT: POSSIBLE LOGIC LEAK (RTP Too Low)
+   Suggest auditing 'Discard' strategy or 'Wild Royal' payouts.
+PS G:\My Drive\Temp\EV Navigator Deuces Wild\ev-navigator-deuces>
+
+
+
+

@@ -996,7 +996,12 @@ class IGT_Machine:
             user_hold_cards = [self.hand[i] for i in self.held_indices]
             if set(user_hold_cards) == set(optimal_hold): user_ev = max_ev
             else: user_ev = dw_exact_solver.calculate_exact_ev(self.hand, self.held_indices, self.sim.paytable)
-            max_ev_disp = max_ev * self.coins_bet; user_ev_disp = user_ev * self.coins_bet
+            
+            # --- FIXED: NORMALIZE EV SCALING ---
+            # Solver returns EV based on 5 coins (Standard).
+            # We must normalize to 1 coin, then multiply by actual bet.
+            max_ev_disp = (max_ev / 5) * self.coins_bet
+            user_ev_disp = (user_ev / 5) * self.coins_bet
             logged_held_indices = list(self.held_indices)
 
             self.core.shuffle(self.stub)

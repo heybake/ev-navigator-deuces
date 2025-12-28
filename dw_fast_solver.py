@@ -1,14 +1,11 @@
 """
 dw_fast_solver.py
-High-Performance Logic Engine (v6.1 - Hybrid)
+High-Performance Logic Engine (v6.2 - Auto-Detect)
 
-Uses Variant-Specific Strategy Playlists to determine optimal holds instantly,
-then uses the Exact Solver to calculate the precise EV for that hold.
+Now features "Paytable Fingerprinting" to ensure the Strategy matches the Machine.
 """
 import dw_strategy_definitions
 from dw_strategy_definitions import STRATEGY_MAP
-
-# We need the math engine to calculate the Score (EV) of the chosen move.
 from dw_exact_solver import calculate_exact_ev
 
 # Map '2'->2 ... 'A'->14 for logic comparisons
@@ -25,44 +22,58 @@ def get_rank_int(card_str):
     if r == 'A': return 14
     return 0
 
+def _detect_variant(paytable):
+    """
+    Fingerprints the paytable to select the correct Strategy Playlist.
+    """
+    if not paytable: return "NSUD"
+    
+    # SIGNATURE: Bonus Deuces (5 Aces pays 80)
+    if paytable.get("FIVE_ACES") == 80:
+        return "BONUS_DEUCES_10_4"
+    
+    # SIGNATURE: Airport / Illinois (5OAK pays 12)
+    if paytable.get("FIVE_OAK") == 12:
+        return "AIRPORT"
+        
+    # SIGNATURE: Loose Deuces (4 Deuces pays 500)
+    if paytable.get("FOUR_DEUCES") == 500:
+        return "LOOSE_DEUCES"
+        
+    # Default to NSUD
+    return "NSUD"
+
 def solve_hand(hand, paytable_dict=None):
     """
     Determines the best hold for a given hand and its EV.
+    Auto-detects variant to prevent Strategy Mismatches.
     
     :param hand: List of strings ['2h', 'Ad', ...]
     :param paytable_dict: Used to identify variant and calc EV.
     :return: (best_hold_cards, calculated_ev)
     """
-    # 1. Identify Variant
-    variant_name = "NSUD" # Default
-    if paytable_dict:
-        # Heuristic to switch to Bonus Deuces logic if paytable matches
-        if paytable_dict.get("FIVE_ACES") == 80:
-            variant_name = "BONUS_DEUCES_10_4"
-        elif paytable_dict.get("FIVE_OAK") == 16:
-            variant_name = "NSUD"
-            
-    # 2. Parse Hand (Normalize first)
-    # Ensure standard format for logic comparisons
+    # 1. Detect Variant from Paytable Signature (ROBUST FIX)
+    variant_name = _detect_variant(paytable_dict)
+    
+    # 2. Load Strategy Playlist
+    strategy = STRATEGY_MAP.get(variant_name, STRATEGY_MAP["NSUD"])
+
+    # 3. Parse Hand
     clean_hand = [c[0].upper() + c[1].lower() for c in hand]
     ranks = [get_rank_int(c) for c in clean_hand]
     suits = [c[1] for c in clean_hand]
-    
-    # 3. Get Strategy Playlist
-    strategy = STRATEGY_MAP.get(variant_name, STRATEGY_MAP["NSUD"])
     
     # 4. Determine Bucket (Deuce Count)
     num_deuces = ranks.count(2)
     bucket_rules = strategy.get(num_deuces, [])
     
-    # 5. Iterate Rules
+    # 5. Iterate Rules (The "Playlist")
     for rule_func in bucket_rules:
         held_cards = rule_func(ranks, suits, clean_hand)
         
         if held_cards is not None:
-            # --- CRITICAL FIX: Calculate Real EV ---
-            # We found the best move. Now we calculate its EV so the
-            # Tests pass and the Logger has data.
+            # We found the best move according to the Playlist.
+            # Now we calculate its exact EV for reporting.
             try:
                 # Map held strings back to indices for the exact solver
                 hold_indices = []
@@ -71,18 +82,16 @@ def solve_hand(hand, paytable_dict=None):
                     if h_card in temp_hand:
                         idx = temp_hand.index(h_card)
                         hold_indices.append(idx)
-                        # Mask to handle duplicates (e.g. 2s, 2s in custom decks)
                         temp_hand[idx] = "USED" 
                 
                 ev = calculate_exact_ev(clean_hand, hold_indices, paytable_dict)
                 return held_cards, ev
                 
             except Exception:
-                # Fallback if math fails (should not happen with verified solver)
                 return held_cards, 0.0
             
     # Fallback (Discard All)
-    # Calculate EV of drawing 5 new cards
+    # This acts as the "Zero Deuces" bottom catch-all if not defined
     try:
         ev = calculate_exact_ev(clean_hand, [], paytable_dict)
         return [], ev

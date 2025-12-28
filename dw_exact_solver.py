@@ -53,24 +53,30 @@ def evaluate_hand(hand, paytable):
         max_count = most_common[0][1] if non_deuces else 0
         total_count = max_count + num_deuces
         
-        # FIVE OF A KIND
+    # FIVE OF A KIND
         if total_count == 5:
             if num_deuces == 4:
                 if "FOUR_DEUCES_ACE" in paytable and 'A' in non_deuces:
                     base_payout = paytable["FOUR_DEUCES_ACE"]
                 else:
                     base_payout = paytable["FOUR_DEUCES"]
-            elif "FIVE_ACES" in paytable and num_deuces > 0:
-                if non_deuces and all(r == 'A' for r in non_deuces):
-                    base_payout = paytable["FIVE_ACES"]
-                elif "FIVE_3_4_5" in paytable and non_deuces and all(r in '345' for r in non_deuces):
-                    base_payout = paytable["FIVE_3_4_5"]
-                elif "FIVE_6_TO_K" in paytable and non_deuces and all(r in '6789TJQK' for r in non_deuces):
-                    base_payout = paytable["FIVE_6_TO_K"]
-                else:
-                    base_payout = paytable.get("FIVE_ACES", paytable.get("FIVE_OAK", 15))
             else:
-                 base_payout = paytable.get("FIVE_OAK", 15)
+                # NEW ROBUST LOGIC: Check Rank First, Then Paytable
+                # We know most_common exists because total_count=5 and num_deuces<4
+                five_oak_rank = most_common[0][0] 
+
+                # Tier 1: Aces
+                if five_oak_rank == 'A' and "FIVE_ACES" in paytable:
+                    base_payout = paytable["FIVE_ACES"]
+                # Tier 2: 3s, 4s, 5s
+                elif five_oak_rank in ['3', '4', '5'] and "FIVE_3_4_5" in paytable:
+                    base_payout = paytable["FIVE_3_4_5"]
+                # Tier 3: 6 through King
+                elif five_oak_rank in ['6', '7', '8', '9', 'T', 'J', 'Q', 'K'] and "FIVE_6_TO_K" in paytable:
+                    base_payout = paytable["FIVE_6_TO_K"]
+                # Fallback: Generic 5OAK
+                else:
+                    base_payout = paytable.get("FIVE_OAK", 15)
 
         # Fallback Robust Evaluator
         if base_payout == 0:
