@@ -105,7 +105,8 @@ class AssetManager:
         self.font_log = pygame.font.SysFont("Segoe UI Symbol", 16)
         self.font_tiny = pygame.font.SysFont("Arial", 13) # Slightly larger for readability
         self.font_menu_title = pygame.font.SysFont("Arial Black", 24)
-        self.font_menu_item = pygame.font.SysFont("Arial Narrow", 22, bold=True)
+        # Fallback to standard Arial if Narrow is missing to avoid warnings
+        self.font_menu_item = pygame.font.SysFont("Arial", 22, bold=True)
         self._load_textures()
 
     def _load_textures(self):
@@ -152,17 +153,25 @@ class StrategyPanel:
         self.assets = assets
         self.machine = machine
         self.active_info = None # Holds match_info from solver
+        
+        # Moved "Session Setup" button here to consolidate UI
+        cx = self.rect.centerx
+        self.btn_setup = PhysicalButton((cx-90, 750, 180, 50), "SESSION SETUP", self.machine.act_open_session_setup)
 
     def set_state(self, match_info):
         self.active_info = match_info
 
     def draw(self, screen):
-        # Draw Background
+        # Draw Background (Always visible now to prevent strobing)
         pygame.draw.rect(screen, (30, 35, 40), self.rect)
         pygame.draw.line(screen, (100,100,100), (self.rect.right,0), (self.rect.right,SCREEN_H), 2)
 
+        # Draw Setup Button (Always available)
+        self.btn_setup.update(pygame.mouse.get_pos(), pygame.mouse.get_pressed()[0])
+        self.btn_setup.draw(screen, self.assets.font_ui)
+
+        # If no hand analysis yet, stop here
         if not self.active_info:
-            # Fallback if no state (shouldn't happen in Decision mode)
             return
 
         bucket_idx = self.active_info['bucket']
@@ -337,8 +346,8 @@ class SessionSetupScreen:
         # Temporary State (Changes applied on Confirm)
         self.temp_bank = machine.start_bankroll
         self.temp_denom = machine.denom
-        self.temp_floor_pct = machine.config_panel.floor_pct
-        self.temp_ceil_pct = machine.config_panel.ceil_pct
+        self.temp_floor_pct = machine.floor_pct
+        self.temp_ceil_pct = machine.ceil_pct
         
         self.buttons = []
         self._init_layout()
@@ -401,10 +410,20 @@ class SessionSetupScreen:
                 "action": lambda val=p: self._set_ceil(val)
             })
 
+        # --- BOTTOM ACTION BAR ---
+        
+        # CONFIRM (Right side)
         self.buttons.append({
-            "rect": pygame.Rect(self.rect.centerx - 100, self.rect.bottom - 100, 200, 60),
+            "rect": pygame.Rect(self.rect.centerx + 20, self.rect.bottom - 100, 200, 60),
             "text": "CONFIRM SETUP", "col": C_DIGITAL_GRN,
             "action": self._confirm
+        })
+
+        # NEW SESSION (Left side - The Reset)
+        self.buttons.append({
+            "rect": pygame.Rect(self.rect.centerx - 220, self.rect.bottom - 100, 200, 60),
+            "text": "NEW SESSION", "col": C_DIGITAL_RED,
+            "action": self._new_session
         })
 
     def _adj_bank(self, amt): self.temp_bank = max(0, self.temp_bank + amt)
@@ -417,12 +436,23 @@ class SessionSetupScreen:
         self.machine.start_bankroll = self.temp_bank
         self.machine.bankroll = self.temp_bank
         self.machine.denom = self.temp_denom
-        self.machine.config_panel.floor_pct = self.temp_floor_pct
-        self.machine.config_panel.ceil_pct = self.temp_ceil_pct
-        self.machine.config_panel.update_machine_limits()
+        self.machine.floor_pct = self.temp_floor_pct
+        self.machine.ceil_pct = self.temp_ceil_pct
+        self.machine.update_machine_limits()
         self.machine.graph_panel.reset(self.temp_bank)
         self.machine.state = "IDLE"
         self.machine.sound.play("rollup")
+
+    def _new_session(self):
+        """Triggers a full factory reset of the game state."""
+        self.machine.start_new_session()
+        # Update local temp vars to match the new defaults
+        self.temp_bank = self.machine.start_bankroll
+        self.temp_denom = self.machine.denom
+        self.temp_floor_pct = self.machine.floor_pct
+        self.temp_ceil_pct = self.machine.ceil_pct
+        self.machine.sound.play("deal") # Auditory confirmation
+        self.machine.state = "IDLE"
 
     def handle_click(self, pos):
         for btn in self.buttons:
@@ -499,16 +529,24 @@ class GameSelectorScreen:
         cols = 4; btn_w, btn_h = 220, 100; gap_x, gap_y = 20, 30
         total_w = (cols * btn_w) + ((cols - 1) * gap_x)
         start_x = self.rect.centerx - (total_w // 2)
-        start_y = self.rect.top + 100
+        start_y = self.rect.top + 150
+
         for i, variant in enumerate(self.variants):
-            row = i // cols; col = i % cols
-            x = start_x + (col * (btn_w + gap_x)); y = start_y + (row * (btn_h + gap_y))
+            r = i // cols
+            c = i % cols
+            x = start_x + (c * (btn_w + gap_x))
+            y = start_y + (r * (btn_h + gap_y))
+            
             clean_name = variant.replace("_", " ")
-            lines = []
-            if "BONUS DEUCES" in clean_name: lines = ["BONUS", "DEUCES", "10 / 4" if "10 4" in clean_name else ""]
-            elif "NSUD" in clean_name: lines = ["NOT SO", "UGLY", "DEUCES"]
-            elif "AIRPORT" in clean_name: lines = ["AIRPORT", "DEUCES", ""]
-            else: lines = [clean_name, "", ""]
+            if "BONUS" in clean_name:
+                lines = ["BONUS", "DEUCES", "10 / 4" if "10 4" in clean_name else ""]
+            elif "NSUD" in clean_name:
+                lines = ["NOT SO", "UGLY", "DEUCES"]
+            elif "AIRPORT" in clean_name:
+                lines = ["AIRPORT", "DEUCES", ""]
+            else:
+                lines = [clean_name, "", ""]
+                
             self.buttons.append({"rect": pygame.Rect(x, y, btn_w, btn_h), "variant": variant, "lines": lines})
 
     def handle_click(self, pos):
@@ -522,13 +560,16 @@ class GameSelectorScreen:
         pygame.draw.rect(screen, C_IGT_BG, self.rect)
         t = self.assets.font_vfd.render("SELECT A GAME", True, C_IGT_GOLD)
         screen.blit(t, t.get_rect(center=(self.rect.centerx, self.rect.top + 50)))
+        
         mouse_pos = pygame.mouse.get_pos()
         for btn in self.buttons:
             r = btn["rect"]; hover = r.collidepoint(mouse_pos)
             border_col = C_WHITE if hover else C_IGT_GOLD
+            
             pygame.draw.rect(screen, border_col, r, border_radius=8)
             pygame.draw.rect(screen, C_IGT_RED, r.inflate(-6, -6), border_radius=6)
             pygame.draw.rect(screen, C_IGT_TXT_BG, r.inflate(-16, -16), border_radius=4)
+            
             y_off = -20
             for line in btn["lines"]:
                 if not line: continue
@@ -538,158 +579,56 @@ class GameSelectorScreen:
                 y_off += 22
 
 # ==============================================================================
-# ⚙️ CONFIG PANEL (READ-ONLY DASHBOARD)
-# ==============================================================================
-class ConfigPanel:
-    def __init__(self, x, y, w, h, assets, machine):
-        self.rect = pygame.Rect(x, y, w, h)
-        self.assets = assets
-        self.machine = machine
-        
-        # State Data
-        self.floor_pct = 70; self.ceil_pct = 125
-        
-        # One Big Button
-        cx = self.rect.centerx
-        self.btn_setup = PhysicalButton((cx-90, 750, 180, 50), "SESSION SETUP", self.open_setup)
-        
-        # Dashboard Colors
-        self.col_inset_bg = (30, 35, 40) # Dark background for sub-panels
-        self.col_border   = (80, 80, 80) # Subtle gray border
-        self.col_header   = (150, 150, 150) # Gray text for labels
-
-    def update_machine_limits(self):
-        start = self.machine.start_bankroll
-        self.machine.floor_val = (start * (self.floor_pct / 100))
-        self.machine.ceil_val = (start * (self.ceil_pct / 100))
-        self.machine.graph_panel.set_limits(self.machine.floor_val, self.machine.ceil_val)
-
-    def open_setup(self):
-        self.machine.act_open_session_setup()
-
-    def draw_inset_panel(self, screen, rect, title, value_lines):
-        # Draw Box
-        pygame.draw.rect(screen, self.col_inset_bg, rect, border_radius=8)
-        pygame.draw.rect(screen, self.col_border, rect, 2, border_radius=8)
-        
-        # Draw Title
-        lbl = self.assets.font_lbl.render(title, True, self.col_header)
-        screen.blit(lbl, lbl.get_rect(center=(rect.centerx, rect.top + 15)))
-        
-        # Draw Separator
-        pygame.draw.line(screen, (60, 65, 70), (rect.left+15, rect.top + 30), (rect.right-15, rect.top + 30), 1)
-        
-        # Draw Value Lines
-        start_y = rect.top + 45
-        for i, (txt_surf, color) in enumerate(value_lines):
-            screen.blit(txt_surf, txt_surf.get_rect(center=(rect.centerx, start_y + (i * 30))))
-
-    def draw(self, screen):
-        pygame.draw.rect(screen, C_PANEL_BG, self.rect)
-        pygame.draw.line(screen, (100,100,100), (self.rect.right,0), (self.rect.right,SCREEN_H), 2)
-        
-        title = self.assets.font_ui.render("ACTIVE SESSION", True, C_YEL_TEXT)
-        screen.blit(title, title.get_rect(center=(self.rect.centerx, 25)))
-        
-        cx = self.rect.centerx
-        w = self.rect.width - 30
-        x = self.rect.left + 15
-        
-        # --- PANEL 1: MACHINE CONFIG ---
-        r1 = pygame.Rect(x, 60, w, 100)
-        v_name = self.machine.sim.variant.replace("BONUS_DEUCES_10_4", "BONUS DEUCES").replace("_", " ")
-        if len(v_name) > 15: v_name = v_name.replace(" ", " ")
-        lines1 = [
-            (self.assets.font_ui.render(v_name, True, C_WHITE), C_WHITE),
-            (self.assets.font_ui.render(f"Denom: ${self.machine.denom:.2f}", True, C_BTN_FACE), C_BTN_FACE)
-        ]
-        self.draw_inset_panel(screen, r1, "MACHINE CONFIG", lines1)
-        
-        # --- PANEL 2: INITIAL BANKROLL ---
-        r2 = pygame.Rect(x, 180, w, 100)
-        lines2 = [
-            (self.assets.font_vfd.render(f"${self.machine.start_bankroll:.0f}", True, C_DIGITAL_GRN), C_DIGITAL_GRN)
-        ]
-        self.draw_inset_panel(screen, r2, "INITIAL BANKROLL", lines2)
-        
-        # --- PANEL 3: EXIT STRATEGY ---
-        r3 = pygame.Rect(x, 300, w, 170)
-        pygame.draw.rect(screen, self.col_inset_bg, r3, border_radius=8)
-        pygame.draw.rect(screen, self.col_border, r3, 2, border_radius=8)
-        
-        lbl = self.assets.font_lbl.render("EXIT STRATEGY", True, self.col_header)
-        screen.blit(lbl, lbl.get_rect(center=(cx, r3.top + 15)))
-        pygame.draw.line(screen, (60, 65, 70), (r3.left+15, r3.top + 30), (r3.right-15, r3.top + 30), 1)
-        
-        target_y = r3.top + 55
-        lbl_t = self.assets.font_tiny.render("TARGET (CEILING)", True, (150, 255, 150))
-        screen.blit(lbl_t, lbl_t.get_rect(center=(cx, target_y)))
-        val_t = self.assets.font_ui.render(f"{self.ceil_pct}% (${self.machine.ceil_val:.0f})", True, C_DIGITAL_GRN)
-        screen.blit(val_t, val_t.get_rect(center=(cx, target_y + 20)))
-        
-        pygame.draw.line(screen, (50, 50, 50), (r3.left+40, target_y + 45), (r3.right-40, target_y + 45), 1)
-        
-        stop_y = target_y + 60
-        lbl_s = self.assets.font_tiny.render("STOP LOSS (FLOOR)", True, (255, 150, 150))
-        screen.blit(lbl_s, lbl_s.get_rect(center=(cx, stop_y)))
-        val_s = self.assets.font_ui.render(f"{self.floor_pct}% (${self.machine.floor_val:.0f})", True, C_DIGITAL_RED)
-        screen.blit(val_s, val_s.get_rect(center=(cx, stop_y + 20)))
-
-        self.btn_setup.update(pygame.mouse.get_pos(), pygame.mouse.get_pressed()[0])
-        self.btn_setup.draw(screen, self.assets.font_ui)
-
-# ==============================================================================
 # 📈 GRAPH PANEL (INTERACTIVE BANKROLL TREND)
 # ==============================================================================
 class GraphPanel:
     def __init__(self, x, y, w, h, font):
         self.rect = pygame.Rect(x, y, w, h)
         self.font = font
-        self.start_bankroll = 100.0
-        self.history = [100.0]
-        self.view_window_size = 50
-        self.floor_val = 0; self.ceil_val = 200
-        
-        # Interaction State
+        self.history = []
+        self.floor_val = 0
+        self.ceil_val = 200
+        self.start_bankroll = 100
         self.selected_hand_id = None
+        self.scroll_offset = 0 # 0 means newest, positive means back in time
+        self.view_window_size = 50
+
+    def reset(self, start_bank):
+        self.history = []
+        self.start_bankroll = start_bank
         self.scroll_offset = 0
+        self.selected_hand_id = None
+
+    def set_limits(self, floor, ceil):
+        self.floor_val = floor
+        self.ceil_val = ceil
 
     def add_point(self, bankroll):
         self.history.append(bankroll)
-        if self.selected_hand_id is None:
-            self.scroll_offset = 0
-
-    def set_limits(self, floor, ceil):
-        self.floor_val = floor; self.ceil_val = ceil
-
-    def reset(self, start_val):
-        self.start_bankroll = start_val
-        self.history = [start_val]
-        self.selected_hand_id = None
-        self.scroll_offset = 0
-
-    def center_on_hand(self, hand_id):
-        if 0 <= hand_id < len(self.history):
-            self.selected_hand_id = hand_id
-            total = len(self.history)
-            target_end = hand_id + (self.view_window_size // 2)
-            self.scroll_offset = max(0, total - target_end)
+        if self.scroll_offset > 0: self.scroll_offset += 1 # Keep selection stable
 
     def handle_click(self, pos):
         if not self.rect.collidepoint(pos): return None
+        # Simple click mapping: map x to index in current view
         if not self.history: return None
         
         total_points = len(self.history)
-        end_idx = max(self.view_window_size, total_points - self.scroll_offset)
-        start_idx = max(0, end_idx - self.view_window_size)
-        data_slice_len = end_idx - start_idx
+        if total_points <= self.view_window_size:
+            data_slice = self.history
+            start_idx = 0
+        else:
+            end_idx = max(self.view_window_size, total_points - self.scroll_offset)
+            start_idx = max(0, end_idx - self.view_window_size)
+            end_idx = min(total_points, start_idx + self.view_window_size)
+            data_slice = self.history[start_idx : end_idx]
         
+        data_slice_len = len(data_slice)
         if data_slice_len < 2: return None
         
         step_x = (self.rect.width - 20) / (data_slice_len - 1)
         rel_x = pos[0] - (self.rect.left + 10)
-        clicked_i = int(round(rel_x / step_x))
         
+        clicked_i = int(round(rel_x / step_x))
         if 0 <= clicked_i < data_slice_len:
             actual_hand_id = start_idx + clicked_i
             self.selected_hand_id = actual_hand_id
@@ -702,9 +641,9 @@ class GraphPanel:
         
         lbl = self.font.render("BANKROLL TREND", True, (150, 150, 150))
         screen.blit(lbl, (self.rect.left + 10, self.rect.top + 5))
-        
+
         if not self.history: return
-        
+
         total_points = len(self.history)
         if total_points <= self.view_window_size:
             data_slice = self.history
@@ -714,9 +653,9 @@ class GraphPanel:
             start_idx = max(0, end_idx - self.view_window_size)
             end_idx = min(total_points, start_idx + self.view_window_size)
             data_slice = self.history[start_idx : end_idx]
-
+            
         if not data_slice: return
-        
+
         vals = data_slice + [self.floor_val, self.ceil_val, self.start_bankroll]
         min_val = min(vals); max_val = max(vals)
         padding_y = (max_val - min_val) * 0.1 if max_val != min_val else 10
@@ -724,25 +663,32 @@ class GraphPanel:
         range_y = max_view - min_view; range_y = 1 if range_y == 0 else range_y
         
         step_x = (self.rect.width - 20) / (len(data_slice) - 1) if len(data_slice) > 1 else 0
-        
+
         def to_screen(i, val):
             px = self.rect.left + 10 + (i * step_x)
             norm = (val - min_view) / range_y
             py = self.rect.bottom - 10 - (norm * (self.rect.height - 30))
             return (px, py)
 
+        # Draw Lines & Labels
         if self.floor_val > 0:
             fy = to_screen(0, self.floor_val)[1]
             if self.rect.top < fy < self.rect.bottom:
                 pygame.draw.line(screen, C_GRAPH_FLOOR, (self.rect.left, fy), (self.rect.right, fy), 1)
-        
+                lbl = self.font.render(f"FLOOR ${self.floor_val:.0f}", True, C_GRAPH_FLOOR)
+                screen.blit(lbl, (self.rect.left + 5, fy + 2))
+
         cy = to_screen(0, self.ceil_val)[1]
         if self.rect.top < cy < self.rect.bottom:
             pygame.draw.line(screen, C_GRAPH_CEIL, (self.rect.left, cy), (self.rect.right, cy), 1)
-            
+            lbl = self.font.render(f"TARGET ${self.ceil_val:.0f}", True, C_GRAPH_CEIL)
+            screen.blit(lbl, (self.rect.left + 5, cy - 12))
+
         base_y = to_screen(0, self.start_bankroll)[1]
         if self.rect.top < base_y < self.rect.bottom:
             pygame.draw.line(screen, C_GRAPH_BASE, (self.rect.left, base_y), (self.rect.right, base_y), 1)
+            lbl = self.font.render(f"START ${self.start_bankroll:.0f}", True, C_GRAPH_BASE)
+            screen.blit(lbl, (self.rect.left + 5, base_y - 12))
 
         for i in range(len(data_slice)):
             real_idx = start_idx + i
@@ -755,16 +701,16 @@ class GraphPanel:
             col = C_GRAPH_LINE_G if data_slice[-1] >= self.start_bankroll else C_GRAPH_LINE_R
             pygame.draw.lines(screen, col, False, points, 2)
             pygame.draw.circle(screen, C_WHITE, (int(points[-1][0]), int(points[-1][1])), 3)
-            
-            if self.selected_hand_id is not None:
-                if start_idx <= self.selected_hand_id < start_idx + len(data_slice):
-                    local_i = self.selected_hand_id - start_idx
-                    val = data_slice[local_i]
-                    pt = to_screen(local_i, val)
-                    pygame.draw.line(screen, C_CYAN_MSG, (pt[0], self.rect.top), (pt[0], self.rect.bottom), 1)
-                    pygame.draw.circle(screen, C_CYAN_MSG, (int(pt[0]), int(pt[1])), 5, 2)
-                    lbl = self.font.render(f"#{self.selected_hand_id}: ${val:.2f}", True, C_CYAN_MSG)
-                    screen.blit(lbl, (pt[0] + 5, pt[1] - 20))
+
+        if self.selected_hand_id is not None:
+            if start_idx <= self.selected_hand_id < start_idx + len(data_slice):
+                local_i = self.selected_hand_id - start_idx
+                val = data_slice[local_i]
+                pt = to_screen(local_i, val)
+                pygame.draw.line(screen, C_CYAN_MSG, (pt[0], self.rect.top), (pt[0], self.rect.bottom), 1)
+                pygame.draw.circle(screen, C_CYAN_MSG, (int(pt[0]), int(pt[1])), 5, 2)
+                lbl = self.font.render(f"#{self.selected_hand_id}: ${val:.2f}", True, C_CYAN_MSG)
+                screen.blit(lbl, (pt[0] + 5, pt[1] - 20))
 
 # ==============================================================================
 # 📜 LOG PANEL (HAND HISTORY)
@@ -773,15 +719,23 @@ class LogPanel:
     def __init__(self, x, y, w, h, assets):
         self.rect = pygame.Rect(x, y, w, h)
         self.assets = assets
-        self.logs = []
+        self.reset()
         self.scroll_y = 0
         self.entry_height = 110
         self.content_height = 0
         self.header_h = 75
-        self.total_bet = 0.0; self.total_won = 0.0; self.total_hands = 0
-        
         self.is_dragging = False; self.drag_start_y = 0; self.scroll_start_y = 0;
         self.thumb_rect = pygame.Rect(0,0,0,0)
+        self.highlighted_id = None
+
+    def reset(self):
+        """Clears all logs and stats."""
+        self.logs = []
+        self.total_bet = 0.0
+        self.total_won = 0.0
+        self.total_hands = 0
+        self.content_height = 0
+        self.scroll_y = 0
         self.highlighted_id = None
 
     def add_entry(self, hand_num, deal_cards, final_cards, held_indices, ev_data, result_data, bet_amount):
@@ -805,6 +759,7 @@ class LogPanel:
             if log['id'] == hand_id:
                 target_idx = i
                 break
+        
         if target_idx != -1:
             target_y = target_idx * self.entry_height
             self.scroll_y = target_y
@@ -816,7 +771,6 @@ class LogPanel:
         
         rel_y = pos[1] - (self.rect.top + self.header_h + 10) + self.scroll_y
         if rel_y < 0: return None
-        
         clicked_idx = int(rel_y // self.entry_height)
         if 0 <= clicked_idx < len(self.logs):
             h_id = self.logs[clicked_idx]['id']
@@ -833,27 +787,26 @@ class LogPanel:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1 and self.thumb_rect.collidepoint(mouse_pos):
                 self.is_dragging = True; self.drag_start_y = mouse_pos[1]; self.scroll_start_y = self.scroll_y
-                
+
         elif event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1: self.is_dragging = False
-            
+            if event.button == 1:
+                self.is_dragging = False
+
         elif event.type == pygame.MOUSEMOTION:
             if self.is_dragging:
                 delta_y = mouse_pos[1] - self.drag_start_y
                 view_h = self.rect.height - self.header_h
                 if self.content_height > view_h and view_h > 0:
-                    ratio = self.content_height / view_h
-                    self.scroll_y = self.scroll_start_y + (delta_y * ratio)
+                    bar_h = view_h
+                    ratio = bar_h / self.content_height # roughly
+                    # reverse engineer the scroll delta
+                    self.scroll_y = self.scroll_start_y + (delta_y / ratio)
                     self._clamp_scroll()
 
     def _clamp_scroll(self):
         view_h = self.rect.height - self.header_h
         max_scroll = max(0, self.content_height - view_h)
-        if self.scroll_y < 0: self.scroll_y = 0
-        if self.scroll_y > max_scroll: self.scroll_y = max_scroll
-
-    def get_scroll_index_offset(self):
-        return 0
+        self.scroll_y = max(0, min(self.scroll_y, max_scroll))
 
     def _calculate_hud_stats(self):
         rtp = (self.total_won / self.total_bet * 100) if self.total_bet > 0 else 0.0
@@ -886,7 +839,6 @@ class LogPanel:
     def draw(self, screen):
         pygame.draw.rect(screen, C_NB_BG, self.rect)
         pygame.draw.rect(screen, C_NB_TEXT, self.rect, 2)
-        
         pygame.draw.rect(screen, (240, 240, 240), (self.rect.left, self.rect.top, self.rect.width, self.header_h))
         pygame.draw.line(screen, C_NB_TEXT, (self.rect.left, self.rect.top + self.header_h), (self.rect.right, self.rect.top + self.header_h), 2)
         
@@ -895,7 +847,7 @@ class LogPanel:
         
         rtp, hit_rate, l10_rate = self._calculate_hud_stats()
         stats_font = self.assets.font_log_bold
-        line1_str = f"HANDS: {self.total_hands}  |  RTP: {rtp:.1f}%"
+        line1_str = f"HANDS: {self.total_hands} | RTP: {rtp:.1f}%"
         screen.blit(stats_font.render(line1_str, True, (80, 80, 80)), (self.rect.centerx - 100, self.rect.top + 30))
         
         hot_str = " 🔥" if l10_rate >= 50 else ""
@@ -911,21 +863,24 @@ class LogPanel:
         for i, log in enumerate(self.logs):
             y = start_y + (i * self.entry_height)
             if y + self.entry_height < self.rect.top or y > self.rect.bottom: continue
-            
+
             if log['id'] == self.highlighted_id:
                 bg_rect = pygame.Rect(self.rect.left + 2, y, self.rect.width - 16, self.entry_height)
                 pygame.draw.rect(screen, (230, 240, 255), bg_rect)
                 pygame.draw.rect(screen, C_GRAPH_BASE, bg_rect, 2)
-
+            
             pygame.draw.line(screen, C_NB_LINES, (self.rect.left + 10, y + self.entry_height - 10), (self.rect.right - 20, y + self.entry_height - 10))
             
             id_txt = self.assets.font_log_bold.render(f"#{log['id']}", True, (100, 100, 100))
             screen.blit(id_txt, (self.rect.left + 15, y))
             
-            win_amt = log['result']['win']
-            win_str = f"WIN: ${win_amt:.2f} ({log['result']['rank']})" if win_amt > 0 else "Result: Loss"
-            win_col = (0, 150, 0) if win_amt > 0 else (150, 150, 150)
-            screen.blit(self.assets.font_log_bold.render(win_str, True, win_col), (self.rect.left + 70, y))
+            res_txt = self.assets.font_log_bold.render(f"{log['result']['rank']}", True, C_NB_BLACK)
+            screen.blit(res_txt, (self.rect.left + 70, y))
+            
+            win = log['result']['win']
+            win_col = (0, 150, 0) if win > 0 else (150, 150, 150)
+            win_txt = self.assets.font_log_bold.render(f"+${win:.2f}", True, win_col)
+            screen.blit(win_txt, (self.rect.right - 80, y))
             
             screen.blit(self.assets.font_log.render("Deal:", True, C_NB_TEXT), (self.rect.left + 15, y + 25))
             self.draw_cards_text(screen, log['deal'], self.rect.left + 70, y + 25, highlights=log['held_idx'])
@@ -952,7 +907,6 @@ class LogPanel:
             thumb_h = max(30, (clip_rect.height / self.content_height) * bar_h)
             scroll_percent = self.scroll_y / (self.content_height - clip_rect.height)
             thumb_y = clip_rect.top + (scroll_percent * (bar_h - thumb_h))
-            
             self.thumb_rect = pygame.Rect(self.rect.right - 14, thumb_y, 12, thumb_h)
             pygame.draw.rect(screen, (230, 230, 230), (self.rect.right - 14, clip_rect.top, 12, bar_h))
             pygame.draw.rect(screen, (150, 150, 150) if not self.is_dragging else (100, 100, 100), self.thumb_rect, border_radius=4)
@@ -969,12 +923,8 @@ class PhysicalButton:
 
     def update(self, mouse_pos, mouse_down):
         self.hover = self.rect.collidepoint(mouse_pos)
-        if self.hover and mouse_down:
-            self.is_pressed = True
-        elif self.is_pressed and self.hover and not mouse_down:
-            self.callback(); self.is_pressed = False
-        else:
-            self.is_pressed = False
+        # Visual state only: pressed if hovering and mouse is effectively down
+        self.is_pressed = self.hover and mouse_down
 
     def draw(self, screen, font):
         draw_rect = self.rect.move(2, 2) if self.is_pressed else self.rect
@@ -999,16 +949,18 @@ class ClickableMeter:
 
     def draw(self, screen, assets, dollar_value, denom):
         val_str = f"{int(dollar_value / denom)}" if self.show_credits else f"${dollar_value:.2f}"
-        lbl = assets.font_lbl.render(self.label, True, C_YEL_TEXT)
-        val = assets.font_vfd.render(val_str, True, self.color)
-        screen.blit(lbl, (self.x_center - lbl.get_width()//2, self.y_base))
-        screen.blit(val, (self.x_center - val.get_width()//2, self.y_base + 20))
+        lbl_surf = assets.font_lbl.render(self.label, True, C_YEL_TEXT)
+        val_surf = assets.font_vfd.render(val_str, True, self.color)
+        screen.blit(lbl_surf, (self.x_center - lbl_surf.get_width()//2, self.y_base))
+        screen.blit(val_surf, (self.x_center - val_surf.get_width()//2, self.y_base + 20))
 
 class VolumeButton:
     def __init__(self, x, y, sound_manager):
-        self.rect = pygame.Rect(x, y, 40, 40); self.sm = sound_manager; self.level = 2
+        self.rect = pygame.Rect(x, y, 40, 40)
+        self.sm = sound_manager
+        self.level = 2 # 0=Mute, 1=Low, 2=Med, 3=High
         self.levels = [0.0, 0.3, 0.6, 1.0]; self.sm.set_volume(self.levels[self.level])
-
+        
     def check_click(self, pos):
         if self.rect.collidepoint(pos):
             self.level = (self.level + 1) % 4; self.sm.set_volume(self.levels[self.level])
@@ -1020,7 +972,6 @@ class VolumeButton:
         pygame.draw.rect(screen, (50, 50, 50), self.rect, border_radius=5)
         pygame.draw.rect(screen, C_WHITE, self.rect, 2, border_radius=5)
         cx, cy = self.rect.centerx, self.rect.centery
-        
         poly_color = C_WHITE if self.level > 0 else (150, 150, 150)
         pygame.draw.polygon(screen, poly_color, [(cx-8, cy-5), (cx-8, cy+5), (cx+2, cy+10), (cx+2, cy-10)])
         
@@ -1047,14 +998,15 @@ class PaytableDisplay:
     def __init__(self, assets, pay_data):
         self.rect = pygame.Rect(260, 20, 960, 360)
         self.assets = assets; self.data = pay_data
-        master = ["NATURAL_ROYAL", "FOUR_DEUCES_ACE", "FOUR_DEUCES", "FIVE_ACES", "FIVE_3_4_5", "FIVE_6_TO_K", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]
+        master = ["NATURAL_ROYAL", "FOUR_DEUCES_ACE", "FOUR_DEUCES", "FIVE_ACES", "FIVE_3_4_5", 
+                  "FIVE_6_TO_K", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", 
+                  "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]
         self.rows = [k for k in master if k in pay_data]
-        self.labels = {
-            "NATURAL_ROYAL":"ROYAL FLUSH", "FOUR_DEUCES_ACE":"4 DEUCES + A", "FOUR_DEUCES":"4 DEUCES",
-            "FIVE_ACES":"5 ACES", "FIVE_3_4_5":"5 3s 4s 5s", "FIVE_6_TO_K":"5 6s THRU Ks", "WILD_ROYAL":"WILD ROYAL",
-            "FIVE_OAK":"5 OF A KIND", "STRAIGHT_FLUSH":"STR FLUSH", "FOUR_OAK":"4 OF A KIND",
-            "FULL_HOUSE":"FULL HOUSE", "FLUSH":"FLUSH", "STRAIGHT":"STRAIGHT", "THREE_OAK":"3 OF A KIND"
-        }
+        self.labels = {"NATURAL_ROYAL":"ROYAL FLUSH", "FOUR_DEUCES_ACE":"4 DEUCES + A", 
+                       "FOUR_DEUCES":"4 DEUCES", "FIVE_ACES":"5 ACES", "FIVE_3_4_5":"5 3s 4s 5s", 
+                       "FIVE_6_TO_K":"5 6s THRU Ks", "WILD_ROYAL":"WILD ROYAL", "FIVE_OAK":"5 OF A KIND", 
+                       "STRAIGHT_FLUSH":"STR FLUSH", "FOUR_OAK":"4 OF A KIND", "FULL_HOUSE":"FULL HOUSE", 
+                       "FLUSH":"FLUSH", "STRAIGHT":"STRAIGHT", "THREE_OAK":"3 OF A KIND"}
 
     def draw(self, screen, coins_bet, winning_rank=None):
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
@@ -1074,6 +1026,7 @@ class PaytableDisplay:
                 val = 4000 if key == "NATURAL_ROYAL" and c == 5 else base * c
                 val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
                 screen.blit(val_surf, (self.rect.left + 160 + ((c-1)*col_w) + col_w - val_surf.get_width() - 10, y))
+        
         pygame.draw.rect(screen, C_YEL_TEXT, self.rect, 2)
 
 # ==============================================================================
@@ -1083,10 +1036,7 @@ class IGT_Machine:
     def __init__(self):
         pygame.init(); pygame.mixer.init(); os.environ['SDL_VIDEO_CENTERED'] = '1'
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-        
-        # UPDATED TITLE HERE
-        pygame.display.set_caption("EV Navigator: Deuces Wild (v7.0)")
-        
+        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer (v8.1)")
         self.clock = pygame.time.Clock()
         self.assets = AssetManager(); self.sound = SoundManager()
         
@@ -1097,17 +1047,23 @@ class IGT_Machine:
         
         self.state = "IDLE"; self.start_bankroll = 100.00; self.bankroll = 100.00
         self.coins_bet = 5; self.denom = 0.25
-        self.floor_val = 0; self.ceil_val = 200
+        
+        # State Tracking for Limits (Moved from ConfigPanel)
+        self.floor_pct = 50
+        self.ceil_pct = 120
+        self.floor_val = 0
+        self.ceil_val = 200
+        
         self.win_display = 0.0; self.win_target = 0.0; self.last_win_rank = None
         self.hand = []; self.stub = []; self.held_indices = []; self.deal_snapshot = []
         
         # 2. Panel Init (Interactive)
         self.log_panel = LogPanel(1240, 20, 340, 500, self.assets)
         self.graph_panel = GraphPanel(1240, 530, 340, 300, self.assets.font_tiny)
-        self.config_panel = ConfigPanel(0, 0, 240, 850, self.assets, self)
         
-        # NEW V8.0 PANELS (Retained v8 features, downgraded title to v7 as requested)
+        # NOTE: Removed ConfigPanel. Using StrategyPanel permanently to avoid strobing.
         self.strategy_panel = StrategyPanel(0, 0, 240, 850, self.assets, self)
+        
         self.codex_screen = CodexScreen(pygame.Rect(240, 0, 1360, 850), self.assets, self)
         
         # 3. Overlays
@@ -1118,9 +1074,15 @@ class IGT_Machine:
         self.cards = [CardSlot(start_x + (i * 152), 410, self.assets) for i in range(5)]
         
         self.auto_hold_active = False; self.auto_play_active = False; self.last_action_time = 0; self.advice_msg = None
-        self.hands_played = 0; self._init_buttons(); self._init_meters(); self.vol_btn = VolumeButton(1200, 785, self.sound) # <--- MOVED RIGHT
+        self.hands_played = 0; self._init_buttons(); self._init_meters(); self.vol_btn = VolumeButton(1200, 785, self.sound)
         
-        self.config_panel.update_machine_limits()
+        self.update_machine_limits()
+
+    def update_machine_limits(self):
+        """Recalculates absolute floor/ceiling values from percentages."""
+        self.floor_val = (self.start_bankroll * (self.floor_pct / 100))
+        self.ceil_val = (self.start_bankroll * (self.ceil_pct / 100))
+        self.graph_panel.set_limits(self.floor_val, self.ceil_val)
 
     def _init_buttons(self):
         y = 780; h = 50
@@ -1146,15 +1108,13 @@ class IGT_Machine:
         self.auto_hold_active = not self.auto_hold_active
         self.btn_auto_hold.text = "AUTO: ON" if self.auto_hold_active else "AUTO HOLD"
         self.btn_auto_hold.color = C_DIGITAL_GRN if self.auto_hold_active else C_DIGITAL_YEL
-        if self.auto_hold_active and self.state == "DECISION":
-            self.run_solver()
+        if self.auto_hold_active and self.state == "DECISION": self.run_solver()
 
     def act_toggle_auto_play(self):
         self.auto_play_active = not self.auto_play_active
         self.btn_auto_play.text = "STOP" if self.auto_play_active else "AUTO PLAY"
         self.btn_auto_play.color = C_DIGITAL_RED if self.auto_play_active else C_BTN_FACE
-        if self.auto_play_active:
-            self.last_action_time = pygame.time.get_ticks()
+        if self.auto_play_active: self.last_action_time = pygame.time.get_ticks()
 
     def run_solver(self):
         # Updated to handle 3 return values
@@ -1182,10 +1142,11 @@ class IGT_Machine:
     def act_open_session_setup(self):
         if self.state == "IDLE":
             self.state = "SESSION_SETUP"
+            # Load current state into temp vars
             self.session_setup.temp_bank = self.bankroll
             self.session_setup.temp_denom = self.denom
-            self.session_setup.temp_floor_pct = self.config_panel.floor_pct
-            self.session_setup.temp_ceil_pct = self.config_panel.ceil_pct
+            self.session_setup.temp_floor_pct = self.floor_pct
+            self.session_setup.temp_ceil_pct = self.ceil_pct
             self.sound.play("bet")
 
     def act_open_codex(self):
@@ -1234,17 +1195,15 @@ class IGT_Machine:
             self.hands_played += 1; self.held_indices = []
             
             for i, c in enumerate(self.hand):
-                self.cards[i].card_val = c; self.cards[i].is_face_up = True; self.cards[i].is_held = False
+                self.cards[i].card_val = c
+                self.cards[i].is_face_up = True
+                self.cards[i].is_held = False
             
-            rank, mult = self.sim.evaluate_hand_score(self.hand)
-            if mult > 0: self.last_win_rank = rank
+            self.sound.play("deal")
+            self.state = "DECISION"
+            self.btn_deal.text = "DRAW"
             
-            self.sound.play("deal"); self.state = "DECISION"; self.btn_deal.text = "DRAW"
-            
-            # CRITICAL FIX: Clear the old strategy state immediately to prevent "Ghost Buckets"
-            self.strategy_panel.active_info = None
-            
-            # --- AUTO-SOLVE FOR HUD ---
+            # --- SOLVER HUD ---
             # Even if not auto-holding, we run the solver to populate the Strategy Panel
             # This allows the user to see the rules immediately.
             res = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
@@ -1254,27 +1213,23 @@ class IGT_Machine:
 
             if self.auto_hold_active or self.auto_play_active:
                 self.run_solver()
-                
+
         elif self.state == "DECISION":
             self.advice_msg = None
             
             # Solver Call (Handle 2 or 3 return values safely)
             solver_res = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
-            if len(solver_res) == 3:
-                optimal_hold, _, _ = solver_res
-            else:
-                optimal_hold, _ = solver_res
+            if len(solver_res) == 3: optimal_hold, _, _ = solver_res
+            else: optimal_hold, _ = solver_res
             
             opt_indices = [i for i, c in enumerate(self.hand) if c in optimal_hold]
             max_ev = dw_exact_solver.calculate_exact_ev(self.hand, opt_indices, self.sim.paytable)
             
             user_hold_cards = [self.hand[i] for i in self.held_indices]
-            if set(user_hold_cards) == set(optimal_hold):
-                user_ev = max_ev
-            else:
-                user_ev = dw_exact_solver.calculate_exact_ev(self.hand, self.held_indices, self.sim.paytable)
-                
-            # --- FIXED: NORMALIZE EV SCALING --- 
+            if set(user_hold_cards) == set(optimal_hold): user_ev = max_ev
+            else: user_ev = dw_exact_solver.calculate_exact_ev(self.hand, self.held_indices, self.sim.paytable)
+            
+            # --- FIXED: NORMALIZE EV SCALING ---
             max_ev_disp = (max_ev / 5) * self.coins_bet
             user_ev_disp = (user_ev / 5) * self.coins_bet
             
@@ -1283,12 +1238,9 @@ class IGT_Machine:
             self.core.shuffle(self.stub)
             for i in range(5):
                 if i not in self.held_indices:
-                    if self.stub:
-                        self.hand[i] = self.stub.pop(0)
+                    if self.stub: self.hand[i] = self.stub.pop(0)
             
-            for i, c in enumerate(self.hand):
-                self.cards[i].card_val = c
-            
+            for i, c in enumerate(self.hand): self.cards[i].card_val = c
             self.sound.play("deal")
             
             rank, mult = self.sim.evaluate_hand_score(self.hand)
@@ -1305,57 +1257,50 @@ class IGT_Machine:
                 self.hands_played, 
                 self.deal_snapshot, 
                 list(self.hand), 
-                logged_held_indices, 
-                {'user': user_ev_disp, 'max': max_ev_disp}, 
+                logged_held_indices,
+                {'user': user_ev_disp, 'max': max_ev_disp},
                 {'win': win_val, 'rank': rank.replace('_',' ')},
                 bet_val
             )
             self.graph_panel.add_point(self.bankroll)
-            
             self.state = "IDLE"; self.btn_deal.text = "DEAL"
 
     def handle_click(self, pos):
-        # 1. Config/Strategy Panel Clicks
-        # If in DECISION mode, the Strategy Panel is visible instead of Config
-        # But Config panel rect is at (0,0), same as Strategy.
-        # Strategy Panel is read-only for clicks unless we add interactivity later.
+        # 1. Strategy Panel Setup Button
         if self.state == "IDLE":
-            if self.config_panel.rect.collidepoint(pos):
-                if self.config_panel.btn_setup.rect.collidepoint(pos):
-                    self.config_panel.btn_setup.callback()
-                return
+             if self.strategy_panel.btn_setup.rect.collidepoint(pos):
+                 self.strategy_panel.btn_setup.callback()
+                 self.sound.play("bet")
+                 return
 
         # 2. Overlays
-        if self.state == "GAME_SELECT":
-            self.game_selector.handle_click(pos); return
-        if self.state == "SESSION_SETUP":
-            self.session_setup.handle_click(pos); return
-        if self.state == "CODEX":
-            self.codex_screen.handle_click(pos); return
+        if self.state == "GAME_SELECT": self.game_selector.handle_click(pos); return
+        if self.state == "SESSION_SETUP": self.session_setup.handle_click(pos); return
+        if self.state == "CODEX": self.codex_screen.handle_click(pos); return
 
         # 3. SYNC INTERACTION
         clicked_hand_id = self.graph_panel.handle_click(pos)
-        if clicked_hand_id is not None:
-            self.log_panel.scroll_to_hand(clicked_hand_id)
-            return
-            
-        clicked_log_id = self.log_panel.handle_click(pos)
-        if clicked_log_id is not None:
-            self.graph_panel.center_on_hand(clicked_log_id)
-            return
-
-        # 4. Standard Game Clicks
-        if self.vol_btn.check_click(pos): return
+        if clicked_hand_id is not None: self.log_panel.scroll_to_hand(clicked_hand_id)
         
-        for m in self.meters:
-            if m.check_click(pos): self.sound.play("bet"); return
+        h_id = self.log_panel.handle_click(pos)
+        if h_id: self.graph_panel.selected_hand_id = h_id
 
+        # 4. GAME CONTROLS
         if self.state == "DECISION":
             for i, slot in enumerate(self.cards):
                 if slot.rect.collidepoint(pos):
-                    self.advice_msg = None; slot.is_held = not slot.is_held
+                    slot.is_held = not slot.is_held
                     if slot.is_held: self.held_indices.append(i)
                     else: self.held_indices.remove(i)
+
+        if self.vol_btn.check_click(pos): return
+
+        for m in self.meters:
+            if m.check_click(pos): self.sound.play("bet"); return
+
+        for btn in self.buttons:
+            if btn.rect.collidepoint(pos):
+                btn.callback(); self.sound.play("bet")
 
     def update_auto_play(self):
         if not self.auto_play_active: return
@@ -1366,12 +1311,10 @@ class IGT_Machine:
     def draw(self):
         self.screen.fill(C_BLACK)
         
-        # LEFT PANEL LOGIC
-        if self.state == "DECISION":
-            self.strategy_panel.draw(self.screen)
-        else:
-            self.config_panel.draw(self.screen)
-            
+        # LEFT PANEL LOGIC (Permanent Strategy Panel to stop strobing)
+        self.strategy_panel.draw(self.screen)
+        
+        # RIGHT PANELS
         self.log_panel.draw(self.screen)
         self.graph_panel.draw(self.screen)
         
@@ -1398,7 +1341,7 @@ class IGT_Machine:
         pygame.draw.line(self.screen, C_WHITE, (off_x, 660), (off_x+game_w, 660), 2)
         
         self.vol_btn.draw(self.screen)
-        
+
         if self.advice_msg:
             msg = self.assets.font_msg.render(self.advice_msg, True, C_CYAN_MSG)
             center_x = 240 + (1000 // 2)
@@ -1412,45 +1355,80 @@ class IGT_Machine:
 
         self.screen.blit(self.assets.font_lbl.render(f"DEALS: {self.hands_played}", True, C_YEL_TEXT), (30+off_x, 750))
         self.screen.blit(self.assets.font_ui.render(f"Deuces Wild ({self.sim.variant})", True, C_WHITE), (20+off_x, 835))
-
+        
         for c in self.cards: c.draw(self.screen)
         
         if self.win_display < self.win_target:
             self.win_display += self.denom; self.win_display = min(self.win_display, self.win_target)
-            
+
         for m in self.meters:
             val = self.win_display if m.label == "WIN" else (self.coins_bet * self.denom if m.label == "BET" else self.bankroll)
             m.draw(self.screen, self.assets, val, self.denom)
-            
+
         cx, cy = 910, 680 + 30; rect = pygame.Rect(cx-40, cy-25, 80, 50)
         pygame.draw.ellipse(self.screen, (255, 215, 0), rect); pygame.draw.ellipse(self.screen, C_BLACK, rect, 2)
-        txt_str = f"{int(self.denom*100)}¢" if self.denom < 1.0 else f"${int(self.denom)}"
-        txt = pygame.font.SysFont("timesnewroman", 28, bold=True).render(txt_str, True, (200, 0, 0))
-        self.screen.blit(txt, txt.get_rect(center=(cx, cy)))
+        txt_str = f"{int(self.denom*100)}¢"
+        txt = self.assets.font_vfd.render(txt_str, True, C_RED_ACTIVE)
+        self.screen.blit(txt, txt.get_rect(center=rect.center))
 
-        mouse_pos = pygame.mouse.get_pos(); mouse_down = pygame.mouse.get_pressed()[0]
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_down = pygame.mouse.get_pressed()[0]
         for b in self.buttons:
-            b.update(mouse_pos, mouse_down); b.draw(self.screen, self.assets.font_ui)
-
+            b.update(mouse_pos, mouse_down)
+            b.draw(self.screen, self.assets.font_ui)
+            
     def run(self):
         running = True
         while running:
             self.update_auto_play()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: running = False
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    self.handle_click(event.pos)
-                    self.log_panel.handle_event(event)
-                elif event.type in [pygame.MOUSEWHEEL, pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN]:
-                    self.log_panel.handle_event(event)
-                elif event.type == pygame.KEYUP:
-                    if self.state in ["GAME_SELECT", "SESSION_SETUP", "CODEX"]: continue
-                    if event.key == pygame.K_a: self.act_toggle_auto_hold()
-                    elif event.key == pygame.K_p: self.act_toggle_auto_play()
-                    elif event.key == pygame.K_SPACE: self.act_deal_draw()
-            
-            self.draw(); self.clock.tick(FPS)
+                elif event.type == pygame.MOUSEBUTTONUP: self.handle_click(event.pos)
+                else: self.log_panel.handle_event(event)
+            self.draw()
+            self.clock.tick(FPS)
         pygame.quit(); sys.exit()
+
+    def start_new_session(self):
+        """Resets the machine to factory defaults (NSUD, $100, Clean Logs)."""
+        # 1. Reset Physics & Logic
+        self.variant_idx = 0
+        self.act_select_game(self.available_variants[self.variant_idx])
+        
+        # 2. Reset Economics
+        self.start_bankroll = 100.00
+        self.bankroll = 100.00
+        self.denom = 0.25
+        self.coins_bet = 5
+        
+        # 3. Reset Limits
+        self.floor_pct = 50
+        self.ceil_pct = 120
+        self.update_machine_limits()
+        
+        # 4. Reset Data
+        self.log_panel.reset()
+        self.graph_panel.reset(self.start_bankroll)
+        self.hands_played = 0
+        
+        # 5. Reset UI State
+        self.state = "IDLE"
+        self.win_display = 0.0
+        self.win_target = 0.0
+        self.last_win_rank = None
+        self.advice_msg = None
+        self.auto_hold_active = False
+        self.auto_play_active = False
+        
+        # Update Button State
+        self.btn_auto_hold.text = "AUTO HOLD"
+        self.btn_auto_hold.color = C_DIGITAL_YEL
+        self.btn_auto_play.text = "AUTO PLAY"
+        self.btn_auto_play.color = C_BTN_FACE
+        
+        # Clear Cards
+        self.hand = []; self.stub = []; self.held_indices = []
+        for c in self.cards: c.card_val = None; c.is_face_up = False; c.is_held = False
 
 if __name__ == "__main__":
     app = IGT_Machine()

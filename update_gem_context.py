@@ -9,11 +9,19 @@ import glob
 # PASTE YOUR GOOGLE DRIVE FOLDER PATH HERE:
 DRIVE_FOLDER = r"G:\My Drive\Temp\EV Navigator Deuces Wild\EV_Navigator_Gem_Context"
 
-# 1. AUTO-DETECT: Grab all Python files (excluding this script)
-SOURCE_FILES = [f for f in glob.glob("*.py") if "update_gem_context" not in f]
+# 1. AUTO-DETECT: Grab all Python files (Now INCLUDES this script)
+SOURCE_FILES = glob.glob("*.py")
 
 # 2. DOCUMENTATION: We grab the Map separately
 DOC_FILES = ["README_GEM_CONTEXT.md"]
+
+def get_file_timestamp(filepath):
+    """Gets the formatted last modification time of a file."""
+    try:
+        ts = os.path.getmtime(filepath)
+        return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return "UNKNOWN"
 
 def create_monolith():
     print(f"🚀 Starting Context Sync...")
@@ -35,16 +43,22 @@ def create_monolith():
             outfile.write("="*60 + "\n\n")
 
             for filename in sorted(SOURCE_FILES):
+                timestamp = get_file_timestamp(filename)
+                
                 outfile.write(f"START_FILE: {filename}\n")
+                outfile.write(f"LAST_MODIFIED: {timestamp}\n")
                 outfile.write("-" * 40 + "\n")
+                
                 try:
                     with open(filename, "r", encoding="utf-8") as infile:
                         outfile.write(infile.read())
                 except Exception as e:
                     outfile.write(f"# Error reading file: {e}\n")
+                
                 outfile.write(f"\n\nEND_FILE: {filename}\n")
                 outfile.write("="*60 + "\n\n")
-                print(f"      + Added: {filename}")
+                print(f"      + Added: {filename} ({timestamp})")
+                
     except Exception as e:
         print(f"❌ Failed: {e}")
         return
@@ -52,8 +66,11 @@ def create_monolith():
     # Copy Documentation
     for doc in DOC_FILES:
         if os.path.exists(doc):
-            shutil.copy2(doc, os.path.join(DRIVE_FOLDER, doc))
-            print(f"   📄 Copied Doc: {doc}")
+            try:
+                shutil.copy2(doc, os.path.join(DRIVE_FOLDER, doc))
+                print(f"   📄 Copied Doc: {doc}")
+            except Exception as e:
+                print(f"   ⚠️ Could not copy doc {doc}: {e}")
 
     print(f"\n✨ Sync Complete! Files are ready in Google Drive.")
 
