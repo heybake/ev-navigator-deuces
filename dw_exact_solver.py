@@ -148,3 +148,26 @@ def solve_hand_silent(hand, paytable):
         if ev > best_ev:
             best_ev = ev; best_hold = [hand[k] for k in hold_idx]
     return best_hold, best_ev
+
+# ... (Keep everything else above this line) ...
+
+def get_best_hold(hand, paytable):
+    """
+    Brute-force checks all 32 possible holds to find the mathematically optimal play.
+    Returns: (best_held_cards_list, max_ev)
+    """
+    best_ev = -1.0
+    best_hold = []
+    
+    # Iterate 0 to 5 cards held (2^5 = 32 combinations)
+    # subset_indices will be tuples like (0, 1, 4) indicating which card indices to keep
+    for r in range(6):
+        for subset_indices in itertools.combinations(range(5), r):
+            current_ev = calculate_exact_ev(hand, subset_indices, paytable)
+            
+            # Update best found so far
+            if current_ev > best_ev:
+                best_ev = current_ev
+                best_hold = [hand[i] for i in subset_indices]
+                
+    return best_hold, best_ev
