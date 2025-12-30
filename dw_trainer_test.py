@@ -475,11 +475,12 @@ class SessionSetupScreen:
 
     def _new_session(self):
         self.machine.start_new_session()
+        # FIX: Force state back to SESSION_SETUP because start_new_session resets it to IDLE
+        self.machine.state = "SESSION_SETUP" 
+        
         self.temp_bank = self.machine.start_bankroll; self.temp_denom = self.machine.denom
         self.temp_floor_pct = self.machine.floor_pct; self.temp_ceil_pct = self.machine.ceil_pct
         self.machine.sound.play("deal")
-        # FIX: Stay on this screen instead of jumping to IDLE
-        # self.machine.state = "IDLE" <--- DELETED
 
     def handle_click(self, pos):
         for btn in self.buttons:
