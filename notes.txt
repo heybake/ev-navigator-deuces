@@ -1,3 +1,39 @@
+**Considering next steps**
+
+Okay, I need to mention the embedding threshold if the user wants it. I’ll provide the next steps clearly, without asking any questions. I’ll make sure to craft the response in a way that’s concise and helpful, focusing on what the user needs to do next. I’ll avoid unnecessary details and keep it straightforward. Let’s make sure everything is clear and actionable for them.
+### Run the converter for `output.raw`
+
+**Command to run**
+```bash
+python raw_to_repro.py --input output.raw --sr 44100 --channels 1 --outprefix voucher --save-wav
+```
+
+### What this will produce
+- **`voucher_samples.npy`** — normalized float32 samples you can load quickly in your game.  
+- **`voucher.wav`** — 16‑bit WAV copy for quick testing or import into audio tools.  
+- **`voucher_reconstruct.py`** — auto‑generated module with `get_samples()` and `play()` helpers.
+
+### How to use the generated module in your Python game
+```python
+from voucher_reconstruct import get_samples, play
+
+samples = get_samples()        # numpy float32 array in [-1,1]
+# play(samples)                # plays via sounddevice (optional)
+# integrate `samples` into your audio engine or save/mix as needed
+```
+
+### Notes and tips
+- **If your RAW uses a different sample rate or is stereo**, re-run with `--sr` set to the correct rate and `--channels 2`.  
+- **If you prefer the samples embedded** directly into the generated module (only for short sounds), re-run with `--embed-threshold N` where `N` is the maximum sample count to embed.  
+- If you want me to produce a version that mixes the original sound with the procedural printer/coin layers and exports the mixed WAV, I can provide the exact command to do that.
+
+
+
+
+
+
+
+
 This is another version of Deuces Wild Bonus.
 
 On videopoker.com it is titled: 10/4/3/3 (97.364%)

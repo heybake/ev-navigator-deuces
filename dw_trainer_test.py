@@ -15,7 +15,7 @@ if "ANDROID_ARGUMENT" in os.environ:
 if os.name == 'nt':
     try:
         import ctypes
-        appid = 'ev_navigator.deuces_wild.universal.v10'
+        appid = 'ev_navigator.deuces_wild.universal.v13'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
     except: pass
 
@@ -50,7 +50,6 @@ if IS_MOBILE:
         PHYSICAL_W, PHYSICAL_H = info.current_h, info.current_w
 else:
     # 💻 PC: Force a civilized window size (1:1 Scale)
-    # This prevents the "IMAX Effect" on large monitors
     PHYSICAL_W = VIRTUAL_W
     PHYSICAL_H = VIRTUAL_H
 
@@ -143,7 +142,7 @@ class SoundManager:
             self._load("deal", "deal.wav")
             self._load("win", "win.wav")
             self._load("rollup", "rollup.wav")
-            self._load("coins", "coins.wav") # NEW: Cash out sound
+            self._load("coins", "coins.wav") 
         self.set_volume(self.volume)
 
     def _load(self, name, filename):
@@ -162,7 +161,7 @@ class SoundManager:
             self.sounds[name].play()
 
 # ==============================================================================
-# 🖼️ ASSET MANAGER (SCALED FONTS)
+# 🖼️ ASSET MANAGER (SCALED FONTS & SYMBOLS)
 # ==============================================================================
 class AssetManager:
     def __init__(self):
@@ -175,22 +174,32 @@ class AssetManager:
         self.font_lbl = pygame.font.SysFont("Arial", s_font(14), bold=True)
         self.font_msg = pygame.font.SysFont("Arial", s_font(24), bold=True)
         
-        # FIX: Improved Font Selection for Suits
-        # We try strict unicode fonts first, then fallback
-        self.font_log_bold = self._get_best_font(["DejaVu Sans", "Segoe UI Symbol", "Arial"], s_font(16), True)
-        self.font_log = self._get_best_font(["DejaVu Sans", "Segoe UI Symbol", "Arial"], s_font(16), False)
+        # LOG FONT - Standard Arial used for safety on Mobile
+        self.font_log_bold = pygame.font.SysFont("Arial", s_font(16), bold=True)
+        self.font_log = pygame.font.SysFont("Arial", s_font(16))
             
         self.font_tiny = pygame.font.SysFont("Arial", s_font(13))
         self.font_micro = pygame.font.SysFont("Arial", s_font(11), bold=True)
         self.font_menu_title = pygame.font.SysFont("Arial Black", s_font(24))
         self.font_menu_item = pygame.font.SysFont("Arial", s_font(22), bold=True)
+        
+        self._init_symbols()
         self._load_textures()
 
-    def _get_best_font(self, font_names, size, is_bold):
-        for name in font_names:
-            if pygame.font.match_font(name):
-                return pygame.font.SysFont(name, size, bold=is_bold)
-        return pygame.font.SysFont("Arial", size, bold=is_bold)
+    def _init_symbols(self):
+        # 🛡️ TEXT TAG PROTOCOL
+        # Use ASCII for mobile to avoid missing glyph boxes.
+        if IS_MOBILE:
+            self.symbols = {
+                's': 'S', 'c': 'C', 'h': 'H', 'd': 'D'
+            }
+        else:
+            self.symbols = {
+                's': '♠', 'c': '♣', 'h': '♥', 'd': '♦'
+            }
+
+    def get_symbol(self, key):
+        return self.symbols.get(key, '?')
 
     def _load_textures(self):
         print(f"Loading assets from: {os.path.abspath(ASSET_DIR)}")
@@ -475,9 +484,7 @@ class SessionSetupScreen:
 
     def _new_session(self):
         self.machine.start_new_session()
-        # FIX: Force state back to SESSION_SETUP because start_new_session resets it to IDLE
-        self.machine.state = "SESSION_SETUP" 
-        
+        self.machine.state = "SESSION_SETUP" # KEEP USER ON SETUP SCREEN
         self.temp_bank = self.machine.start_bankroll; self.temp_denom = self.machine.denom
         self.temp_floor_pct = self.machine.floor_pct; self.temp_ceil_pct = self.machine.ceil_pct
         self.machine.sound.play("deal")
@@ -777,15 +784,20 @@ class LogPanel:
         return rtp, hit_rate, l10_rate
 
     def draw_cards_text(self, screen, cards, x, y, highlights=None):
-        suit_map = {'s': '♠', 'c': '♣', 'h': '♥', 'd': '♦'}
         font = self.assets.font_log_bold; char_w = s(35)
         for i, card in enumerate(cards):
             current_x = x + (i * char_w)
             if highlights and i in highlights:
                 pygame.draw.rect(screen, C_NB_HIGHLIGHT, (current_x - s(2), y, char_w - s(2), s(20)))
+            
             rank = card[0]; suit_char = card[1]
             color = C_NB_RED if suit_char in 'hd' else C_NB_BLACK
-            screen.blit(font.render(f"{rank}{suit_map.get(suit_char, suit_char)}", True, color), (current_x, y))
+            
+            # USE SAFE SYMBOL LOOKUP
+            suit_sym = self.assets.get_symbol(suit_char)
+            text = f"{rank}{suit_sym}"
+            
+            screen.blit(font.render(text, True, color), (current_x, y))
 
     def draw(self, screen):
         pygame.draw.rect(screen, C_NB_BG, self.rect)
@@ -823,9 +835,12 @@ class LogPanel:
             self.draw_cards_text(screen, log['final'], self.rect.left + s(70), y + s(50), highlights=log['held_idx'])
             
             user_ev = log['ev']['user']; max_ev = log['ev']['max']; diff = max_ev - user_ev
-            if diff < 0.01: dec = f"✅ Optimal ({user_ev:.2f})"; col = (0, 120, 0)
-            elif diff < 0.05: dec = f"⚠️ Alternate (-{diff:.2f} EV)"; col = (200, 140, 0)
-            else: dec = f"❌ Error: -{diff:.2f} EV (Max: {max_ev:.2f})"; col = C_NB_RED
+            
+            # REMOVED SYMBOLS AS REQUESTED (CLEAN TEXT ONLY)
+            if diff < 0.01: dec = f"Optimal ({user_ev:.2f})"; col = (0, 120, 0)
+            elif diff < 0.05: dec = f"Alternate (-{diff:.2f} EV)"; col = (200, 140, 0)
+            else: dec = f"Error: -{diff:.2f} EV (Max: {max_ev:.2f})"; col = C_NB_RED
+            
             screen.blit(self.assets.font_log_bold.render(dec, True, col), (self.rect.left + s(15), y + s(75)))
 
         screen.set_clip(original_clip)
@@ -941,7 +956,7 @@ class IGT_Machine:
 
         self.screen = pygame.display.set_mode((PHYSICAL_W, PHYSICAL_H), FULLSCREEN_FLAG)
              
-        pygame.display.set_caption("EV Navigator - Universal (v10)")
+        pygame.display.set_caption("EV Navigator - Universal (v13)")
         self.clock = pygame.time.Clock()
         self.assets = AssetManager(); self.sound = SoundManager()
         self.available_variants = list(PAYTABLES.keys()); self.variant_idx = 0
