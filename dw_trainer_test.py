@@ -1,239 +1,29 @@
 import pygame
-import os
 import sys
-import math
-import platform
+import os
 
-# ==============================================================================
-# 🌍 UNIVERSAL ENVIRONMENT SETUP (PC + ANDROID)
-# ==============================================================================
-# Pydroid 3 Sandbox Escape: Force CWD to script location
+# Pydroid 3 Sandbox Escape
 if "ANDROID_ARGUMENT" in os.environ:
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# Windows Taskbar Fix (Only runs on PC)
+# Windows Taskbar Fix
 if os.name == 'nt':
     try:
         import ctypes
-        appid = 'ev_navigator.deuces_wild.universal.v13'
+        appid = 'ev_navigator.deuces_wild.universal.v14'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
     except: pass
 
-# Import Core Logic
+# --- IMPORTS ---
+# 1. Import the Core Physics & Math
 import dw_sim_engine
 import dw_fast_solver
 import dw_exact_solver
 import dw_strategy_definitions 
 from dw_pay_constants import PAYTABLES
 
-# ==============================================================================
-# 📐 UNIVERSAL SCALING ENGINE
-# ==============================================================================
-# The game logic is built around this "Virtual Resolution".
-VIRTUAL_W = 1600
-VIRTUAL_H = 850
-
-# CONFIG FLAGS
-IS_MOBILE = "ANDROID_ARGUMENT" in os.environ
-
-# DETECT PHYSICAL SCREEN
-pygame.init()
-info = pygame.display.Info()
-
-if IS_MOBILE:
-    # 📱 MOBILE: Grab the actual hardware dimensions to fill the screen
-    PHYSICAL_W = info.current_w
-    PHYSICAL_H = info.current_h
-    
-    # FORCE LANDSCAPE ON MOBILE
-    if PHYSICAL_H > PHYSICAL_W:
-        PHYSICAL_W, PHYSICAL_H = info.current_h, info.current_w
-else:
-    # 💻 PC: Force a civilized window size (1:1 Scale)
-    PHYSICAL_W = VIRTUAL_W
-    PHYSICAL_H = VIRTUAL_H
-
-# CALCULATE SCALE FACTOR
-scale_x = PHYSICAL_W / VIRTUAL_W
-scale_y = PHYSICAL_H / VIRTUAL_H
-SCALE = min(scale_x, scale_y) # Fit within the bounds
-
-# CENTERING OFFSETS
-ACTUAL_GAME_W = int(VIRTUAL_W * SCALE)
-ACTUAL_GAME_H = int(VIRTUAL_H * SCALE)
-X_OFFSET = (PHYSICAL_W - ACTUAL_GAME_W) // 2
-Y_OFFSET = (PHYSICAL_H - ACTUAL_GAME_H) // 2
-
-# FRAME RATE TARGETS
-FPS_LIMIT = 30 if IS_MOBILE else 60
-FPS_ACTIVE = FPS_LIMIT
-FPS_IDLE = 15 if IS_MOBILE else 30
-FULLSCREEN_FLAG = pygame.FULLSCREEN if IS_MOBILE else pygame.RESIZABLE
-
-# --- SCALING HELPERS ---
-def s(val):
-    """Scales a single integer value."""
-    return int(val * SCALE)
-
-def s_rect(x, y, w, h):
-    """Creates a Scaled Rect, centered on the physical screen."""
-    return pygame.Rect(s(x) + X_OFFSET, s(y) + Y_OFFSET, s(w), s(h))
-
-def s_font(size):
-    """Scales font size."""
-    return max(10, int(size * SCALE))
-
-# COLORS
-C_BG_BLUE     = (0, 0, 150)
-C_FELT_GREEN  = (0, 80, 40)
-C_BLACK       = (0, 0, 0)
-C_WHITE       = (255, 255, 255)
-C_YEL_TEXT    = (255, 255, 0)
-C_RED_ACTIVE  = (180, 0, 0)
-C_DIGITAL_RED = (255, 50, 50)
-C_DIGITAL_YEL = (255, 255, 50)
-C_DIGITAL_GRN = (50, 205, 50)
-C_CYAN_MSG    = (0, 255, 255)
-C_BTN_FACE    = (230, 230, 230)
-C_BTN_SHADOW  = (100, 100, 100)
-C_HELD_BORDER = (255, 255, 0)
-C_SILVER      = (192, 192, 192) 
-C_GOLD_HELD   = (255, 215, 0)
-
-# --- PANEL THEMES ---
-C_PANEL_BG    = (40, 45, 50)
-C_NB_BG       = (255, 255, 255)
-C_NB_TEXT     = (20, 20, 20)
-C_NB_RED      = (200, 0, 0)
-C_NB_BLACK    = (0, 0, 0)
-C_NB_HIGHLIGHT= (255, 230, 80)
-C_NB_LINES    = (200, 200, 200)
-C_GRAPH_BG    = (20, 25, 30)
-C_GRAPH_GRID  = (50, 60, 70)
-C_GRAPH_LINE_G= (0, 255, 100)
-C_GRAPH_LINE_R= (255, 80, 80)
-C_GRAPH_BASE  = (100, 100, 255)
-C_GRAPH_CEIL  = (0, 200, 0)
-C_GRAPH_FLOOR = (200, 0, 0)
-
-# --- IGT MENU THEME ---
-C_IGT_BG      = (0, 0, 130)
-C_IGT_GOLD    = (218, 165, 32)
-C_IGT_RED     = (200, 0, 0)
-C_IGT_TXT_BG  = (0, 0, 80)
-C_IGT_TXT     = (0, 255, 255)
-C_IGT_TXT_SEL = (255, 255, 0)
-
-# ASSETS
-ASSET_DIR = os.path.join("images", "cards")
-SOUND_DIR = "sounds"
-CARD_SIZE = (s(142), s(215))
-
-# ==============================================================================
-# 🔊 SOUND MANAGER
-# ==============================================================================
-class SoundManager:
-    def __init__(self):
-        self.sounds = {}
-        self.enabled = True
-        self.volume = 0.5 
-        if os.path.exists(SOUND_DIR):
-            self._load("bet", "bet.wav")
-            self._load("deal", "deal.wav")
-            self._load("win", "win.wav")
-            self._load("rollup", "rollup.wav")
-            self._load("coins", "coins.wav") 
-        self.set_volume(self.volume)
-
-    def _load(self, name, filename):
-        try:
-            path = os.path.join(SOUND_DIR, filename)
-            self.sounds[name] = pygame.mixer.Sound(path)
-        except: pass
-
-    def set_volume(self, vol):
-        self.volume = vol
-        for s in self.sounds.values():
-            s.set_volume(vol)
-
-    def play(self, name):
-        if self.enabled and self.volume > 0 and name in self.sounds:
-            self.sounds[name].play()
-
-# ==============================================================================
-# 🖼️ ASSET MANAGER (SCALED FONTS & SYMBOLS)
-# ==============================================================================
-class AssetManager:
-    def __init__(self):
-        self.cards = {}
-        self.back = None
-        # Fonts scaled by SCALE factor
-        self.font_ui = pygame.font.SysFont("Arial", s_font(16), bold=True)
-        self.font_grid = pygame.font.SysFont("Arial", s_font(18), bold=True)
-        self.font_vfd = pygame.font.SysFont("Impact", s_font(32))
-        self.font_lbl = pygame.font.SysFont("Arial", s_font(14), bold=True)
-        self.font_msg = pygame.font.SysFont("Arial", s_font(24), bold=True)
-        
-        # LOG FONT - Standard Arial used for safety on Mobile
-        self.font_log_bold = pygame.font.SysFont("Arial", s_font(16), bold=True)
-        self.font_log = pygame.font.SysFont("Arial", s_font(16))
-            
-        self.font_tiny = pygame.font.SysFont("Arial", s_font(13))
-        self.font_micro = pygame.font.SysFont("Arial", s_font(11), bold=True)
-        self.font_menu_title = pygame.font.SysFont("Arial Black", s_font(24))
-        self.font_menu_item = pygame.font.SysFont("Arial", s_font(22), bold=True)
-        
-        self._init_symbols()
-        self._load_textures()
-
-    def _init_symbols(self):
-        # 🛡️ TEXT TAG PROTOCOL
-        # Use ASCII for mobile to avoid missing glyph boxes.
-        if IS_MOBILE:
-            self.symbols = {
-                's': 'S', 'c': 'C', 'h': 'H', 'd': 'D'
-            }
-        else:
-            self.symbols = {
-                's': '♠', 'c': '♣', 'h': '♥', 'd': '♦'
-            }
-
-    def get_symbol(self, key):
-        return self.symbols.get(key, '?')
-
-    def _load_textures(self):
-        print(f"Loading assets from: {os.path.abspath(ASSET_DIR)}")
-        ranks = "23456789TJQKA"; suits = "shdc"
-        count = 0
-        for s_char in suits:
-            for r in ranks:
-                key = r + s_char
-                path = os.path.join(ASSET_DIR, f"{key}.png")
-                if os.path.exists(path):
-                    try:
-                        img = pygame.image.load(path).convert_alpha()
-                        self.cards[key] = pygame.transform.smoothscale(img, CARD_SIZE)
-                        count += 1
-                    except Exception as e: print(f"Error loading {key}: {e}")
-        
-        joker_path = os.path.join(ASSET_DIR, "joker.png")
-        if os.path.exists(joker_path):
-            try:
-                img = pygame.image.load(joker_path).convert_alpha()
-                self.cards['JOKER'] = pygame.transform.smoothscale(img, CARD_SIZE)
-            except: pass
-
-        back_path = os.path.join(ASSET_DIR, "back.png")
-        if os.path.exists(back_path):
-            try:
-                img = pygame.image.load(back_path).convert_alpha()
-                self.back = pygame.transform.smoothscale(img, CARD_SIZE)
-            except: pass
-        else:
-            surf = pygame.Surface(CARD_SIZE)
-            surf.fill((0, 50, 200))
-            pygame.draw.rect(surf, C_WHITE, (5,5,CARD_SIZE[0]-10,CARD_SIZE[1]-10), 2)
-            self.back = surf
+# 2. Import the New UI Library (The "Engine Room")
+from dw_universal_lib import *
 
 # ==============================================================================
 # 🧠 STRATEGY PANEL
@@ -956,7 +746,7 @@ class IGT_Machine:
 
         self.screen = pygame.display.set_mode((PHYSICAL_W, PHYSICAL_H), FULLSCREEN_FLAG)
              
-        pygame.display.set_caption("EV Navigator - Universal (v13)")
+        pygame.display.set_caption("EV Navigator - Universal (v14)")
         self.clock = pygame.time.Clock()
         self.assets = AssetManager(); self.sound = SoundManager()
         self.available_variants = list(PAYTABLES.keys()); self.variant_idx = 0
@@ -1005,7 +795,8 @@ class IGT_Machine:
         self.btn_auto_hold = self.buttons[2]; self.btn_auto_play = self.buttons[3]; self.btn_deal = self.buttons[-1]
         
         # NEW: Cash Out Button (Hidden by default)
-        self.btn_cash_out = PhysicalButton(s_rect(start_x + 690, y - h - 10, 150, h), "CASH OUT", self.act_cash_out, color=C_DIGITAL_GRN)
+        # Smaller button (100x40), positioned at (1150, 630) to sit above the Credit Meter
+        self.btn_cash_out = PhysicalButton(s_rect(1127, 700, 100, 40), "CASH OUT", self.act_cash_out, color=C_DIGITAL_GRN)
 
     def _init_meters(self):
         self.meter_win = ClickableMeter(400, 680, "WIN", C_DIGITAL_RED)
@@ -1021,9 +812,13 @@ class IGT_Machine:
         return hit_floor or hit_ceil
 
     def act_cash_out(self):
-        self.sound.play("coins")
-        # Visual feedback or reset logic could go here
-        # For now, just the sound as requested
+        # Play voucher sound, but cut it off after 1.5 seconds (1500ms)
+        self.sound.play("voucher", maxtime=5000)
+        
+        # Logic: Reset machine to 0 credits.
+        self.bankroll = 0.00
+        self.win_display = 0.00
+        self.advice_msg = "CASHED OUT: $0.00"
 
     def act_toggle_auto_hold(self):
         self.auto_hold_active = not self.auto_hold_active
