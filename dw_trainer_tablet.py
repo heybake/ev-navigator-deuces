@@ -1189,21 +1189,24 @@ class IGT_Machine:
         running = True
         while running:
             self.update_auto_play()
+            
+            # 1. Fetch all pending events
             for event in pygame.event.get():
-                if event.type == pygame.QUIT: running = False
+                if event.type == pygame.QUIT:
+                    running = False
+                
+                # 2. Pass events to UI elements (like scrolling)
                 self.log_panel.handle_event(event)
                 
-                # TOUCH SUPPORT: Map Finger Up to Click
-                if event.type == pygame.FINGERUP:
-                    # Convert 0-1 float to pixel coords
-                    x = int(event.x * SCREEN_W)
-                    y = int(event.y * SCREEN_H)
-                    self.handle_click((x, y))
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    self.handle_click(event.pos)
+                # 3. STRICT CLICK HANDLING (Indented INSIDE the loop)
+                if event.type == pygame.MOUSEBUTTONUP:
+                    # Check for Left Click (1) to filter out drags/scrolls
+                    if event.button == 1:
+                        self.handle_click(event.pos)
             
             self.draw()
-            # Dynamic Frame Cap for Battery Saving
+            
+            # Dynamic Frame Cap
             if self.state == "IDLE" and not self.auto_play_active:
                 self.clock.tick(FPS_IDLE)
             else:
