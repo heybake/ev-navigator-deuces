@@ -2,6 +2,7 @@ import pygame
 import os
 import sys
 import math
+import ctypes # <--- NEW
 # Ensure dw_sim_engine.py is in the same directory or python path
 import dw_sim_engine
 # Import solvers and definitions
@@ -833,9 +834,26 @@ class PaytableDisplay:
 # ==============================================================================
 class IGT_Machine:
     def __init__(self):
+        # 1. Force Windows Taskbar to use our Icon (The "Pro" Fix)
+        if os.name == 'nt':
+            try:
+                # Arbitrary string ID: 'company.product.subproduct.version'
+                appid = 'ev_navigator.deuces_wild.trainer.v9_5'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
+            except: pass
+
         pygame.init(); pygame.mixer.init(); os.environ['SDL_VIDEO_CENTERED'] = '1'
+        
+        # 2. Load the Window Icon
+        try:
+            icon_path = os.path.join("images", "app_icon.png")
+            if os.path.exists(icon_path):
+                icon = pygame.image.load(icon_path)
+                pygame.display.set_icon(icon)
+        except: pass
+
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer (v9.4)")
+        pygame.display.set_caption("EV Navigator - Deuces Wild Trainer (v9.5)")
         self.clock = pygame.time.Clock()
         self.assets = AssetManager(); self.sound = SoundManager()
         self.available_variants = list(PAYTABLES.keys()); self.variant_idx = 0
