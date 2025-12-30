@@ -1,10 +1,11 @@
 """
 dw_fast_solver.py
-High-Performance Logic Engine (v8.0 - Strategy Viz)
+High-Performance Logic Engine (v9.0 - Multi-Hold Support)
 
 Features:
 - Auto-Detects Variant.
-- Returns Metadata about *which* rule triggered the hold.
+- Returns a list of the top 2 possible holds based on strategy priority.
+- Provides Metadata for UI/Trainer feedback.
 """
 import dw_strategy_definitions
 from dw_strategy_definitions import STRATEGY_MAP
@@ -14,7 +15,6 @@ from dw_exact_solver import calculate_exact_ev
 RANK_MAP = {r: i for i, r in enumerate("..23456789TJQKA", 0)} 
 
 def get_rank_int(card_str):
-    # 'Th' -> 'T' -> 10
     r = card_str[0].upper()
     if r.isdigit(): return int(r)
     if r == 'T': return 10
@@ -25,87 +25,94 @@ def get_rank_int(card_str):
     return 0
 
 def _detect_variant(paytable):
-    """
-    Fingerprints the paytable to select the correct Strategy Playlist.
-    """
     if not paytable: return "NSUD"
-    
-    # SIGNATURE: Bonus Deuces (5 Aces pays 80)
-    if paytable.get("FIVE_ACES") == 80:
-        return "BONUS_DEUCES_10_4"
-    
-    # SIGNATURE: Airport / Illinois (5OAK pays 12)
-    if paytable.get("FIVE_OAK") == 12:
-        return "AIRPORT"
-        
-    # SIGNATURE: Loose Deuces (4 Deuces pays 500)
-    if paytable.get("FOUR_DEUCES") == 500:
-        return "LOOSE_DEUCES"
-        
-    # Default to NSUD
+    if paytable.get("FIVE_ACES") == 80: return "BONUS_DEUCES_10_4"
+    if paytable.get("FIVE_OAK") == 12: return "AIRPORT"
+    if paytable.get("FOUR_DEUCES") == 500: return "LOOSE_DEUCES"
     return "NSUD"
 
 def solve_hand(hand, paytable_dict=None):
     """
-    Determines the best hold for a given hand and its EV.
-    Auto-detects variant to prevent Strategy Mismatches.
-    
-    Returns: (held_cards, ev, match_info)
+    Exhaustively scans the strategy playlist to find the Best and Runner-Up holds.
+    Returns: A list of dicts: [{'held': list, 'ev': float, 'info': dict}, ...]
     """
-    # 1. Detect Variant from Paytable Signature
     variant_name = _detect_variant(paytable_dict)
-    
-    # 2. Load Strategy Playlist
     strategy = STRATEGY_MAP.get(variant_name, STRATEGY_MAP["NSUD"])
 
-    # 3. Parse Hand
     clean_hand = [c[0].upper() + c[1].lower() for c in hand]
     ranks = [get_rank_int(c) for c in clean_hand]
     suits = [c[1] for c in clean_hand]
     
-    # 4. Determine Bucket (Deuce Count)
     num_deuces = ranks.count(2)
     bucket_rules = strategy.get(num_deuces, [])
     
-    # 5. Iterate Rules (The "Playlist")
+    found_plays = []
+    seen_combinations = [] # To ensure unique card sets
+
+    # Iterate through ALL rules in the playlist
     for index, rule_func in enumerate(bucket_rules):
         held_cards = rule_func(ranks, suits, clean_hand)
         
         if held_cards is not None:
-            try:
-                # Map held strings back to indices for the exact solver
+            # Check if this set of cards is unique (avoid duplicate holds)
+            sorted_hold = sorted(held_cards)
+            if sorted_hold not in seen_combinations:
+                seen_combinations.append(sorted_hold)
+                
+                # Calculate EV for this specific hold
                 hold_indices = []
                 temp_hand = list(clean_hand)
                 for h_card in held_cards:
                     if h_card in temp_hand:
                         idx = temp_hand.index(h_card)
                         hold_indices.append(idx)
-                        temp_hand[idx] = "USED" 
+                        temp_hand[idx] = "USED"
                 
                 ev = calculate_exact_ev(clean_hand, hold_indices, paytable_dict)
                 
-                # METADATA FOR UI
-                match_info = {
-                    "bucket": num_deuces,
-                    "rule_idx": index,
-                    "rule_name": dw_strategy_definitions.get_pretty_name(rule_func),
-                    "total_rules": len(bucket_rules)
+                play_data = {
+                    "held": held_cards,
+                    "ev": ev,
+                    "info": {
+                        "bucket": num_deuces,
+                        "rule_idx": index,
+                        "rule_name": dw_strategy_definitions.get_pretty_name(rule_func),
+                        "total_rules": len(bucket_rules)
+                    }
                 }
-                
-                return held_cards, ev, match_info
-                
-            except Exception:
-                return held_cards, 0.0, None
-            
-    # Fallback (Discard All)
-    try:
-        ev = calculate_exact_ev(clean_hand, [], paytable_dict)
-        match_info = {
-            "bucket": num_deuces,
-            "rule_idx": len(bucket_rules) - 1, # Assume discard is last
-            "rule_name": "DISCARD ALL",
-            "total_rules": len(bucket_rules)
-        }
-        return [], ev, match_info
-    except:
-        return [], 0.0, None
+                found_plays.append(play_data)
+
+        # Stop if we found top 2 to keep speed high
+        if len(found_plays) >= 2:
+            break
+
+    # If Discard All wasn't reached, evaluate it as a potential Runner-Up
+    if len(found_plays) < 2:
+        ev_all = calculate_exact_ev(clean_hand, [], paytable_dict)
+        if [] not in seen_combinations:
+            found_plays.append({
+                "held": [],
+                "ev": ev_all,
+                "info": {"bucket": num_deuces, "rule_idx": 99, "rule_name": "DISCARD ALL"}
+            })
+
+    return found_plays
+
+# ==========================================
+# 🧪 INDEPENDENT TEST SUITE
+# ==========================================
+if __name__ == "__main__":
+    from dw_pay_constants import PAYTABLES
+    
+    # Test Case: NSUD variant, Hand with multiple viable holds
+    # Hand: 2h, 2s, 4h, Th, Kh (Pat Flush vs 2 Deuces)
+    test_hand = ["2h", "2s", "4h", "Th", "Kh"]
+    pt = PAYTABLES["NSUD"]
+    
+    print(f"🕵️  AUDITING SOLVER: {test_hand}")
+    results = solve_hand(test_hand, pt)
+    
+    for i, res in enumerate(results, 1):
+        label = "BEST" if i == 1 else "RUNNER-UP"
+        h_str = " ".join(res['held']) if res['held'] else "DISCARD ALL"
+        print(f"   {label}: {h_str:<15} | EV: {res['ev']:.4f} | Rule: {res['info']['rule_name']}")
