@@ -65,14 +65,11 @@ ACTUAL_GAME_H = int(VIRTUAL_H * SCALE)
 X_OFFSET = (PHYSICAL_W - ACTUAL_GAME_W) // 2
 Y_OFFSET = (PHYSICAL_H - ACTUAL_GAME_H) // 2
 
-# CONFIG FLAGS
-IS_MOBILE = "ANDROID_ARGUMENT" in os.environ
-FPS_LIMIT = 30 if IS_MOBILE else 60
-FULLSCREEN_FLAG = pygame.FULLSCREEN if IS_MOBILE else pygame.RESIZABLE
-
 # FRAME RATE TARGETS
+FPS_LIMIT = 30 if IS_MOBILE else 60
 FPS_ACTIVE = FPS_LIMIT
 FPS_IDLE = 15 if IS_MOBILE else 30
+FULLSCREEN_FLAG = pygame.FULLSCREEN if IS_MOBILE else pygame.RESIZABLE
 
 # --- SCALING HELPERS ---
 def s(val):
@@ -146,6 +143,7 @@ class SoundManager:
             self._load("deal", "deal.wav")
             self._load("win", "win.wav")
             self._load("rollup", "rollup.wav")
+            self._load("coins", "coins.wav") # NEW: Cash out sound
         self.set_volume(self.volume)
 
     def _load(self, name, filename):
@@ -176,19 +174,23 @@ class AssetManager:
         self.font_vfd = pygame.font.SysFont("Impact", s_font(32))
         self.font_lbl = pygame.font.SysFont("Arial", s_font(14), bold=True)
         self.font_msg = pygame.font.SysFont("Arial", s_font(24), bold=True)
-        # Fallback fonts
-        try:
-            self.font_log_bold = pygame.font.SysFont("Segoe UI Symbol", s_font(16), bold=True)
-            self.font_log = pygame.font.SysFont("Segoe UI Symbol", s_font(16))
-        except:
-            self.font_log_bold = pygame.font.SysFont("Arial", s_font(16), bold=True)
-            self.font_log = pygame.font.SysFont("Arial", s_font(16))
+        
+        # FIX: Improved Font Selection for Suits
+        # We try strict unicode fonts first, then fallback
+        self.font_log_bold = self._get_best_font(["DejaVu Sans", "Segoe UI Symbol", "Arial"], s_font(16), True)
+        self.font_log = self._get_best_font(["DejaVu Sans", "Segoe UI Symbol", "Arial"], s_font(16), False)
             
         self.font_tiny = pygame.font.SysFont("Arial", s_font(13))
         self.font_micro = pygame.font.SysFont("Arial", s_font(11), bold=True)
         self.font_menu_title = pygame.font.SysFont("Arial Black", s_font(24))
         self.font_menu_item = pygame.font.SysFont("Arial", s_font(22), bold=True)
         self._load_textures()
+
+    def _get_best_font(self, font_names, size, is_bold):
+        for name in font_names:
+            if pygame.font.match_font(name):
+                return pygame.font.SysFont(name, size, bold=is_bold)
+        return pygame.font.SysFont("Arial", size, bold=is_bold)
 
     def _load_textures(self):
         print(f"Loading assets from: {os.path.abspath(ASSET_DIR)}")
@@ -475,7 +477,9 @@ class SessionSetupScreen:
         self.machine.start_new_session()
         self.temp_bank = self.machine.start_bankroll; self.temp_denom = self.machine.denom
         self.temp_floor_pct = self.machine.floor_pct; self.temp_ceil_pct = self.machine.ceil_pct
-        self.machine.sound.play("deal"); self.machine.state = "IDLE"
+        self.machine.sound.play("deal")
+        # FIX: Stay on this screen instead of jumping to IDLE
+        # self.machine.state = "IDLE" <--- DELETED
 
     def handle_click(self, pos):
         for btn in self.buttons:
@@ -984,11 +988,26 @@ class IGT_Machine:
         ]
         self.btn_auto_hold = self.buttons[2]; self.btn_auto_play = self.buttons[3]; self.btn_deal = self.buttons[-1]
         
+        # NEW: Cash Out Button (Hidden by default)
+        self.btn_cash_out = PhysicalButton(s_rect(start_x + 690, y - h - 10, 150, h), "CASH OUT", self.act_cash_out, color=C_DIGITAL_GRN)
+
     def _init_meters(self):
         self.meter_win = ClickableMeter(400, 680, "WIN", C_DIGITAL_RED)
         self.meter_bet = ClickableMeter(740, 680, "BET", C_DIGITAL_YEL)
         self.meter_credit = ClickableMeter(1080, 680, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
         self.meters = [self.meter_win, self.meter_bet, self.meter_credit]
+
+    # HELPER: Check if we hit a limit (Floor or Ceiling)
+    @property
+    def is_limit_reached(self):
+        hit_floor = (self.floor_val > 0 and self.bankroll <= self.floor_val)
+        hit_ceil = (self.ceil_val > 0 and self.bankroll >= self.ceil_val)
+        return hit_floor or hit_ceil
+
+    def act_cash_out(self):
+        self.sound.play("coins")
+        # Visual feedback or reset logic could go here
+        # For now, just the sound as requested
 
     def act_toggle_auto_hold(self):
         self.auto_hold_active = not self.auto_hold_active
@@ -1051,8 +1070,16 @@ class IGT_Machine:
         self.coins_bet = 5; self.sound.play("bet"); self.act_deal_draw()
     def act_deal_draw(self):
         if self.state == "IDLE":
-            if self.floor_val > 0 and self.bankroll <= self.floor_val: self.auto_play_active = False; self.advice_msg = "FLOOR HIT: MISSION ABORTED"; self.act_toggle_auto_play(); return
-            if self.ceil_val > 0 and self.bankroll >= self.ceil_val: self.auto_play_active = False; self.advice_msg = "CEILING HIT: MISSION SUCCESS"; self.act_toggle_auto_play(); return
+            # Modified Logic: Auto-stop if limit reached, but allow manual Deal if they want to push luck
+            if self.floor_val > 0 and self.bankroll <= self.floor_val: 
+                self.auto_play_active = False; self.advice_msg = "FLOOR HIT: CASH OUT?"; self.act_toggle_auto_play()
+                # We return here to force user acknowledgment, but they can click Deal again to override
+                if self.auto_play_active: return 
+            
+            if self.ceil_val > 0 and self.bankroll >= self.ceil_val: 
+                self.auto_play_active = False; self.advice_msg = "CEILING HIT: CASH OUT!"; self.act_toggle_auto_play()
+                if self.auto_play_active: return
+
             cost = self.coins_bet * self.denom
             if self.bankroll < cost: return
             self.bankroll -= cost
@@ -1118,6 +1145,12 @@ class IGT_Machine:
                     if slot.is_held: self.held_indices.append(i)
                     else: self.held_indices.remove(i)
         if self.vol_btn.check_click(pos): return
+        
+        # Check Cash Out (Only if limit reached)
+        if self.is_limit_reached and self.btn_cash_out.rect.collidepoint(pos):
+            self.btn_cash_out.callback()
+            return
+
         for m in self.meters:
             if m.check_click(pos): self.sound.play("bet"); return
         for btn in self.buttons:
@@ -1163,7 +1196,14 @@ class IGT_Machine:
         self.screen.blit(txt, txt.get_rect(center=rect.center))
         
         mouse_pos = pygame.mouse.get_pos(); mouse_down = pygame.mouse.get_pressed()[0]
+        
+        # Draw Standard Buttons
         for b in self.buttons: b.update(mouse_pos, mouse_down); b.draw(self.screen, self.assets.font_ui)
+        
+        # Draw Cash Out Button (Only if Limit Reached)
+        if self.is_limit_reached:
+            self.btn_cash_out.update(mouse_pos, mouse_down)
+            self.btn_cash_out.draw(self.screen, self.assets.font_ui)
 
     def draw(self):
         self.screen.fill(C_BLACK)
