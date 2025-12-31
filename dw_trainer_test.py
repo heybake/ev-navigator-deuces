@@ -270,6 +270,10 @@ class SessionSetupScreen:
         self.machine.start_bankroll = self.temp_bank; self.machine.bankroll = self.temp_bank
         self.machine.denom = self.temp_denom; self.machine.floor_pct = self.temp_floor_pct; self.machine.ceil_pct = self.temp_ceil_pct
         self.machine.update_machine_limits(); self.machine.graph_panel.reset(self.temp_bank)
+        
+        # --- FIXED: Reset Cashed Out flag so button can work next time ---
+        self.machine.cashed_out = False
+        
         self.machine.state = "IDLE"; self.machine.sound.play("rollup")
 
     def _new_session(self):
@@ -615,21 +619,46 @@ class LogPanel:
             pygame.draw.line(screen, C_NB_LINES, (self.rect.left + s(10), y + self.entry_height - s(10)), (self.rect.right - s(20), y + self.entry_height - s(10)))
             
             screen.blit(self.assets.font_log_bold.render(f"#{log['id']}", True, (100, 100, 100)), (self.rect.left + s(15), y))
-            screen.blit(self.assets.font_log_bold.render(f"{log['result']['rank']}", True, C_NB_BLACK), (self.rect.left + s(70), y))
-            win = log['result']['win']
-            screen.blit(self.assets.font_log_bold.render(f"+${win:.2f}", True, (0, 150, 0) if win > 0 else (150, 150, 150)), (self.rect.right - s(80), y))
+            
+            # --- UPDATED: Rank Label ---
+            raw_rank = log['result']['rank']
+            disp_rank = RANK_DISPLAY_MAP.get(raw_rank, raw_rank.replace('_', ' ')) # Fallback to spaced if not in map
+            if len(disp_rank) > 16: disp_rank = disp_rank[:14] + ".."
+            screen.blit(self.assets.font_log_bold.render(disp_rank, True, C_NB_BLACK), (self.rect.left + s(70), y))
+            
+            # --- UPDATED: Financials (Right Align + Logic) ---
+            win_val = log['result']['win']
+            bet_val = log['bet']
+            diff = win_val - bet_val
+            
+            if diff > 0.001:
+                # WIN (Green) -> Show Payout
+                fin_color = (0, 180, 0)
+                fin_txt = f"${win_val:.2f}"
+            elif abs(diff) < 0.001:
+                # PUSH (Grey) -> Show Payout
+                fin_color = C_PUSH_GREY # (120,120,120) from Universal Lib
+                fin_txt = f"${win_val:.2f}"
+            else:
+                # LOSS (Red) -> Show Cost
+                fin_color = C_RED_ACTIVE
+                fin_txt = f"${bet_val:.2f}"
+            
+            fin_surf = self.assets.font_log_bold.render(fin_txt, True, fin_color)
+            # Right Align: Panel Right Edge - Padding - Text Width
+            x_draw = self.rect.right - s(20) - fin_surf.get_width()
+            screen.blit(fin_surf, (x_draw, y))
             
             screen.blit(self.assets.font_log.render("Deal:", True, C_NB_TEXT), (self.rect.left + s(15), y + s(25)))
             self.draw_cards_text(screen, log['deal'], self.rect.left + s(70), y + s(25), highlights=log['held_idx'])
             screen.blit(self.assets.font_log.render("Final:", True, C_NB_TEXT), (self.rect.left + s(15), y + s(50)))
             self.draw_cards_text(screen, log['final'], self.rect.left + s(70), y + s(50), highlights=log['held_idx'])
             
-            user_ev = log['ev']['user']; max_ev = log['ev']['max']; diff = max_ev - user_ev
+            user_ev = log['ev']['user']; max_ev = log['ev']['max']; diff_ev = max_ev - user_ev
             
-            # REMOVED SYMBOLS AS REQUESTED (CLEAN TEXT ONLY)
-            if diff < 0.01: dec = f"Optimal ({user_ev:.2f})"; col = (0, 120, 0)
-            elif diff < 0.05: dec = f"Alternate (-{diff:.2f} EV)"; col = (200, 140, 0)
-            else: dec = f"Error: -{diff:.2f} EV (Max: {max_ev:.2f})"; col = C_NB_RED
+            if diff_ev < 0.01: dec = f"Optimal ({user_ev:.2f})"; col = (0, 120, 0)
+            elif diff_ev < 0.05: dec = f"Alternate (-{diff_ev:.2f} EV)"; col = (200, 140, 0)
+            else: dec = f"Error: -{diff_ev:.2f} EV (Max: {max_ev:.2f})"; col = C_NB_RED
             
             screen.blit(self.assets.font_log_bold.render(dec, True, col), (self.rect.left + s(15), y + s(75)))
 
@@ -758,6 +787,9 @@ class IGT_Machine:
         self.win_display = 0.0; self.win_target = 0.0; self.last_win_rank = None
         self.hand = []; self.stub = []; self.held_indices = []; self.deal_snapshot = []
         
+        # --- FIXED: ADD CASHED OUT STATE ---
+        self.cashed_out = False 
+        
         # SCALED LAYOUT INITS
         self.log_panel = LogPanel(1240, 20, 340, 500, self.assets)
         self.graph_panel = GraphPanel(1240, 530, 340, 300, self.assets.font_tiny)
@@ -819,6 +851,9 @@ class IGT_Machine:
         self.bankroll = 0.00
         self.win_display = 0.00
         self.advice_msg = "CASHED OUT: $0.00"
+        
+        # --- FIXED: SET STATE TO PREVENT BUTTON REAPPEARANCE ---
+        self.cashed_out = True
 
     def act_toggle_auto_hold(self):
         self.auto_hold_active = not self.auto_hold_active
@@ -840,7 +875,8 @@ class IGT_Machine:
         if not results: return
         best_cards = results[0]['held']
 
-        if self.auto_hold_active:
+        # --- FIX: Auto Play implies Auto Hold ---
+        if self.auto_hold_active or self.auto_play_active:
             self.held_indices = []
             for i, card in enumerate(self.hand):
                 if card in best_cards: 
@@ -851,7 +887,10 @@ class IGT_Machine:
                     if card in second_cards: self.cards[i].is_runner_up = True
             
             self.advice_msg = None if best_cards else "ADVICE: DRAW ALL"
-            self.sound.play("bet")
+            
+            # Only play sound if purely auto-hold (not auto-play, to reduce noise)
+            if not self.auto_play_active:
+                self.sound.play("bet")
         else:
             self.held_indices = []
     def act_open_menu(self):
@@ -881,6 +920,11 @@ class IGT_Machine:
         self.coins_bet = 5; self.sound.play("bet"); self.act_deal_draw()
     def act_deal_draw(self):
         if self.state == "IDLE":
+            # --- FIXED: PREVENT DEALING IF CASHED OUT ---
+            if self.cashed_out:
+                self.advice_msg = "PLEASE RESET BANKROLL"
+                return
+
             # Modified Logic: Auto-stop if limit reached, but allow manual Deal if they want to push luck
             if self.floor_val > 0 and self.bankroll <= self.floor_val: 
                 self.auto_play_active = False; self.advice_msg = "FLOOR HIT: CASH OUT?"; self.act_toggle_auto_play()
@@ -922,7 +966,8 @@ class IGT_Machine:
             if win_val > 0: self.sound.play("win"); self.last_win_rank = rank; self.win_target = win_val; self.bankroll += win_val
             else: self.last_win_rank = None
             bet_val = (self.coins_bet * self.denom)
-            self.log_panel.add_entry(self.hands_played, self.deal_snapshot, list(self.hand), logged_held_indices, {'user': user_ev_disp, 'max': max_ev_disp}, {'win': win_val, 'rank': rank.replace('_',' ')}, bet_val)
+            # --- UPDATED: Pass Raw Rank Code for lookup map ---
+            self.log_panel.add_entry(self.hands_played, self.deal_snapshot, list(self.hand), logged_held_indices, {'user': user_ev_disp, 'max': max_ev_disp}, {'win': win_val, 'rank': rank}, bet_val)
             self.graph_panel.add_point(self.bankroll)
             self.state = "IDLE"; self.btn_deal.text = "DEAL"
 
@@ -957,8 +1002,9 @@ class IGT_Machine:
                     else: self.held_indices.remove(i)
         if self.vol_btn.check_click(pos): return
         
-        # Check Cash Out (Only if limit reached)
-        if self.is_limit_reached and self.btn_cash_out.rect.collidepoint(pos):
+        # Check Cash Out (Only if Limit Reached AND Not Cashed Out)
+        # --- FIXED: CHECK FOR CASHED OUT STATE ---
+        if self.is_limit_reached and not self.cashed_out and self.btn_cash_out.rect.collidepoint(pos):
             self.btn_cash_out.callback()
             return
 
@@ -1011,8 +1057,9 @@ class IGT_Machine:
         # Draw Standard Buttons
         for b in self.buttons: b.update(mouse_pos, mouse_down); b.draw(self.screen, self.assets.font_ui)
         
-        # Draw Cash Out Button (Only if Limit Reached)
-        if self.is_limit_reached:
+        # Draw Cash Out Button (Only if Limit Reached AND Not Cashed Out)
+        # --- FIXED: CHECK FOR CASHED OUT STATE ---
+        if self.is_limit_reached and not self.cashed_out:
             self.btn_cash_out.update(mouse_pos, mouse_down)
             self.btn_cash_out.draw(self.screen, self.assets.font_ui)
 

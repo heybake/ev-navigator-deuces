@@ -76,6 +76,7 @@ C_BTN_SHADOW  = (100, 100, 100)
 C_HELD_BORDER = (255, 255, 0)
 C_SILVER      = (192, 192, 192) 
 C_GOLD_HELD   = (255, 215, 0)
+C_PUSH_GREY   = (120, 120, 120) # Added for Hand History (Push/Break Even)
 
 # --- PANEL THEMES ---
 C_PANEL_BG    = (40, 45, 50)
@@ -101,6 +102,34 @@ C_IGT_TXT_BG  = (0, 0, 80)
 C_IGT_TXT     = (0, 255, 255)
 C_IGT_TXT_SEL = (255, 255, 0)
 
+# --- TEXT MAPPING ---
+# Translates internal engine codes to clean Human Readable text
+RANK_DISPLAY_MAP = {
+    "NATURAL_ROYAL":    "Royal Flush",
+    "ROYAL_FLUSH":      "Royal Flush",
+    "FOUR_DEUCES":      "Four Deuces",
+    "FOUR_DEUCES_ACE":  "4 Deuces + Ace",
+    "WILD_ROYAL":       "Wild Royal",
+    "FIVE_OF_A_KIND":   "Five of a Kind",
+    "FIVE_OAK":         "Five of a Kind",
+    "FIVE_ACES":        "Five Aces",
+    "FIVE_3_4_5":       "Five 3s 4s 5s",
+    "FIVE_6_TO_K":      "Five 6s thru Ks",
+    "STRAIGHT_FLUSH":   "Straight Flush",
+    "FOUR_OF_A_KIND":   "Four of a Kind",
+    "FOUR_OAK":         "Four of a Kind",
+    "FULL_HOUSE":       "Full House",
+    "FLUSH":            "Flush",
+    "STRAIGHT":         "Straight",
+    "THREE_OF_A_KIND":  "Three of a Kind",
+    "THREE_OAK":        "Three of a Kind",
+    "TWO_PAIR":         "Two Pair",
+    "JACKS_OR_BETTER":  "Jacks or Better",
+    "NOTHING":          "Loss",
+    "LOSER":            "Loss",
+    "ERROR":            "Error"
+}
+
 # ASSETS
 ASSET_DIR = os.path.join("images", "cards")
 SOUND_DIR = "sounds"
@@ -119,7 +148,7 @@ class SoundManager:
             self._load("deal", "deal.wav")
             self._load("win", "win.wav")
             self._load("rollup", "rollup.wav")
-            self._load("voucher", "voucher.wav") # <--- Fixed: Matches your file
+            self._load("voucher", "voucher.wav")
         self.set_volume(self.volume)
 
     def _load(self, name, filename):
