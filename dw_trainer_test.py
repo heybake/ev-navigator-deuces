@@ -1,6 +1,8 @@
 import pygame
 import sys
 import os
+import csv
+import datetime
 
 # Pydroid 3 Sandbox Escape
 if "ANDROID_ARGUMENT" in os.environ:
@@ -24,6 +26,93 @@ from dw_pay_constants import PAYTABLES
 
 # 2. Import the New UI Library (The "Engine Room")
 from dw_universal_lib import *
+
+# ==============================================================================
+# 📝 SESSION LOGGER (DATA ACQUISITION)
+# ==============================================================================
+class SessionLogger:
+    def __init__(self):
+        self.active = False
+        self.filepath = None
+        self.writer = None
+        self.file_handle = None
+
+    def start_session(self, variant_name):
+        # 1. Generate Filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"dw_session_{timestamp}.csv"
+        
+        # 2. Determine Path (Safe for PC and Mobile)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, "logs")
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        self.filepath = os.path.join(log_dir, filename)
+        
+        # 3. Open File
+        try:
+            self.file_handle = open(self.filepath, mode='w', newline='', encoding='utf-8')
+            self.writer = csv.writer(self.file_handle)
+            
+            # 4. Write Headers
+            headers = [
+                "HandID", "Time", "Variant", "Bankroll_Start", "Denom", "Coins", "Bet_Cost",
+                "Deal_1", "Deal_2", "Deal_3", "Deal_4", "Deal_5",
+                "Held_Indices", "Auto_Hold_Used",
+                "Final_1", "Final_2", "Final_3", "Final_4", "Final_5",
+                "Result_Rank", "Win_Amt", "Profit",
+                "EV_User", "EV_Max", "EV_Error", "Perfect_Play"
+            ]
+            self.writer.writerow(headers)
+            self.file_handle.flush()
+            self.active = True
+            print(f"📝 Logging started: {self.filepath}")
+        except Exception as e:
+            print(f"❌ Logging Failed: {e}")
+            self.active = False
+
+    def log_hand(self, data):
+        if not self.active or not self.writer: return
+        
+        # Parse timestamp
+        t_str = datetime.datetime.now().strftime("%H:%M:%S")
+        
+        # Calculate derived metrics
+        ev_user = data.get('ev_user', 0)
+        ev_max = data.get('ev_max', 0)
+        err = ev_max - ev_user
+        is_perfect = (err < 0.0001)
+        
+        profit = data.get('win', 0) - data.get('cost', 0)
+        
+        # Flatten card lists
+        deal = data.get('deal', [])
+        final = data.get('final', [])
+        
+        # Safe access helper
+        def get_c(lst, i): return lst[i] if i < len(lst) else ""
+        
+        row = [
+            data.get('id'), t_str, data.get('variant'), 
+            f"{data.get('bank_start'):.2f}", data.get('denom'), data.get('coins'), f"{data.get('cost'):.2f}",
+            get_c(deal,0), get_c(deal,1), get_c(deal,2), get_c(deal,3), get_c(deal,4),
+            str(data.get('held_idx')), data.get('auto_hold'),
+            get_c(final,0), get_c(final,1), get_c(final,2), get_c(final,3), get_c(final,4),
+            data.get('rank'), f"{data.get('win'):.2f}", f"{profit:.2f}",
+            f"{ev_user:.4f}", f"{ev_max:.4f}", f"{err:.4f}", str(is_perfect)
+        ]
+        
+        try:
+            self.writer.writerow(row)
+            self.file_handle.flush()
+        except: pass
+
+    def close_session(self):
+        if self.file_handle:
+            self.file_handle.close()
+        self.active = False
+        print("📝 Logging stopped.")
 
 # ==============================================================================
 # 🧠 STRATEGY PANEL
@@ -259,6 +348,28 @@ class SessionSetupScreen:
         conf_w, conf_h = s(200), s(60)
         self.buttons.append({"rect": pygame.Rect(self.rect.centerx + s(20), self.rect.bottom - s(100), conf_w, conf_h), "text": "CONFIRM SETUP", "col": C_DIGITAL_GRN, "action": self._confirm})
         self.buttons.append({"rect": pygame.Rect(self.rect.centerx - s(220), self.rect.bottom - s(100), conf_w, conf_h), "text": "NEW SESSION", "col": C_DIGITAL_RED, "action": self._new_session})
+        
+        # --- LOGGING TOGGLE (Top Right of Setup) ---
+        self.btn_log = PhysicalButton(
+            s_rect(1420, 20, 150, 50), "LOGGING: OFF", self._toggle_log, color=C_DIGITAL_RED
+        )
+
+    def _toggle_log(self):
+        # Toggle functionality
+        if self.machine.logging_enabled:
+            # Turn OFF
+            self.machine.logging_enabled = False
+            self.machine.logger.close_session()
+            self.btn_log.text = "LOGGING: OFF"
+            self.btn_log.color = C_DIGITAL_RED
+        else:
+            # Turn ON
+            self.machine.logging_enabled = True
+            self.machine.logger.start_session(self.machine.sim.variant)
+            self.btn_log.text = "LOGGING: ON"
+            self.btn_log.color = C_DIGITAL_GRN
+        
+        self.machine.sound.play("bet")
 
     def _adj_bank(self, amt): self.temp_bank = max(0, self.temp_bank + amt)
     def _set_bank(self, val): self.temp_bank = val
@@ -284,6 +395,11 @@ class SessionSetupScreen:
         self.machine.sound.play("deal")
 
     def handle_click(self, pos):
+        # Check Logging Toggle first (it's physically outside the main loop of buttons)
+        if self.btn_log.rect.collidepoint(pos):
+            self.btn_log.callback()
+            return
+
         for btn in self.buttons:
             if btn["rect"].collidepoint(pos): btn["action"](); self.machine.sound.play("bet"); return
 
@@ -312,6 +428,8 @@ class SessionSetupScreen:
         screen.blit(lbl_c, lbl_c.get_rect(center=(c3_x, self.rect.top + s(280))))
 
         mouse_pos = pygame.mouse.get_pos()
+        
+        # Draw Standard Buttons
         for btn in self.buttons:
             r = btn["rect"]; hover = r.collidepoint(mouse_pos)
             fill_col = btn.get("col", C_BTN_FACE); border_col = C_BLACK
@@ -324,6 +442,10 @@ class SessionSetupScreen:
             pygame.draw.rect(screen, fill_col, r, border_radius=s(6))
             pygame.draw.rect(screen, border_col, r, s(2), border_radius=s(6))
             screen.blit(self.assets.font_ui.render(btn["text"], True, C_BLACK), self.assets.font_ui.render(btn["text"], True, C_BLACK).get_rect(center=r.center))
+            
+        # Draw Logging Toggle (using update/draw pattern)
+        self.btn_log.update(mouse_pos, pygame.mouse.get_pressed()[0])
+        self.btn_log.draw(screen, self.assets.font_ui)
 
 # ==============================================================================
 # 🎮 GAME SELECTOR SCREEN
@@ -620,24 +742,24 @@ class LogPanel:
             
             screen.blit(self.assets.font_log_bold.render(f"#{log['id']}", True, (100, 100, 100)), (self.rect.left + s(15), y))
             
-            # --- UPDATED: Rank Label ---
+            # --- Rank Label ---
             raw_rank = log['result']['rank']
-            disp_rank = RANK_DISPLAY_MAP.get(raw_rank, raw_rank.replace('_', ' ')) # Fallback to spaced if not in map
+            disp_rank = RANK_DISPLAY_MAP.get(raw_rank, raw_rank.replace('_', ' ')) 
             if len(disp_rank) > 16: disp_rank = disp_rank[:14] + ".."
             screen.blit(self.assets.font_log_bold.render(disp_rank, True, C_NB_BLACK), (self.rect.left + s(70), y))
             
-            # --- UPDATED: Financials (Right Align + Logic) ---
+            # --- Financials (Right Align + Logic) ---
             win_val = log['result']['win']
             bet_val = log['bet']
             diff = win_val - bet_val
             
             if diff > 0.001:
-                # WIN (Green) -> Show Payout
+                # WIN (Green)
                 fin_color = (0, 180, 0)
                 fin_txt = f"${win_val:.2f}"
             elif abs(diff) < 0.001:
-                # PUSH (Grey) -> Show Payout
-                fin_color = C_PUSH_GREY # (120,120,120) from Universal Lib
+                # PUSH (Grey)
+                fin_color = C_PUSH_GREY 
                 fin_txt = f"${win_val:.2f}"
             else:
                 # LOSS (Red) -> Show Cost
@@ -645,7 +767,6 @@ class LogPanel:
                 fin_txt = f"${bet_val:.2f}"
             
             fin_surf = self.assets.font_log_bold.render(fin_txt, True, fin_color)
-            # Right Align: Panel Right Edge - Padding - Text Width
             x_draw = self.rect.right - s(20) - fin_surf.get_width()
             screen.blit(fin_surf, (x_draw, y))
             
@@ -790,6 +911,10 @@ class IGT_Machine:
         # --- FIXED: ADD CASHED OUT STATE ---
         self.cashed_out = False 
         
+        # --- LOGGING ---
+        self.logger = SessionLogger()
+        self.logging_enabled = False
+        
         # SCALED LAYOUT INITS
         self.log_panel = LogPanel(1240, 20, 340, 500, self.assets)
         self.graph_panel = GraphPanel(1240, 530, 340, 300, self.assets.font_tiny)
@@ -827,7 +952,6 @@ class IGT_Machine:
         self.btn_auto_hold = self.buttons[2]; self.btn_auto_play = self.buttons[3]; self.btn_deal = self.buttons[-1]
         
         # NEW: Cash Out Button (Hidden by default)
-        # Smaller button (100x40), positioned at (1150, 630) to sit above the Credit Meter
         self.btn_cash_out = PhysicalButton(s_rect(1127, 700, 100, 40), "CASH OUT", self.act_cash_out, color=C_DIGITAL_GRN)
 
     def _init_meters(self):
@@ -836,7 +960,6 @@ class IGT_Machine:
         self.meter_credit = ClickableMeter(1080, 680, "CREDIT", C_DIGITAL_RED, default_is_credits=False)
         self.meters = [self.meter_win, self.meter_bet, self.meter_credit]
 
-    # HELPER: Check if we hit a limit (Floor or Ceiling)
     @property
     def is_limit_reached(self):
         hit_floor = (self.floor_val > 0 and self.bankroll <= self.floor_val)
@@ -844,15 +967,10 @@ class IGT_Machine:
         return hit_floor or hit_ceil
 
     def act_cash_out(self):
-        # Play voucher sound, but cut it off after 1.5 seconds (1500ms)
         self.sound.play("voucher", maxtime=5000)
-        
-        # Logic: Reset machine to 0 credits.
         self.bankroll = 0.00
         self.win_display = 0.00
         self.advice_msg = "CASHED OUT: $0.00"
-        
-        # --- FIXED: SET STATE TO PREVENT BUTTON REAPPEARANCE ---
         self.cashed_out = True
 
     def act_toggle_auto_hold(self):
@@ -868,10 +986,8 @@ class IGT_Machine:
     def run_solver(self):
         results = dw_fast_solver.solve_hand(self.hand, self.sim.paytable)
         self.strategy_panel.set_results(results)
-        
         for c in self.cards: c.is_held = False; c.is_runner_up = False
         self.advice_msg = None
-        
         if not results: return
         best_cards = results[0]['held']
 
@@ -885,14 +1001,11 @@ class IGT_Machine:
                 second_cards = results[1]['held']
                 for i, card in enumerate(self.hand):
                     if card in second_cards: self.cards[i].is_runner_up = True
-            
             self.advice_msg = None if best_cards else "ADVICE: DRAW ALL"
-            
-            # Only play sound if purely auto-hold (not auto-play, to reduce noise)
-            if not self.auto_play_active:
-                self.sound.play("bet")
+            if not self.auto_play_active: self.sound.play("bet")
         else:
             self.held_indices = []
+            
     def act_open_menu(self):
         if self.state == "IDLE": self.state = "GAME_SELECT"; self.sound.play("bet")
     def act_open_session_setup(self):
@@ -925,12 +1038,9 @@ class IGT_Machine:
                 self.advice_msg = "PLEASE RESET BANKROLL"
                 return
 
-            # Modified Logic: Auto-stop if limit reached, but allow manual Deal if they want to push luck
             if self.floor_val > 0 and self.bankroll <= self.floor_val: 
                 self.auto_play_active = False; self.advice_msg = "FLOOR HIT: CASH OUT?"; self.act_toggle_auto_play()
-                # We return here to force user acknowledgment, but they can click Deal again to override
                 if self.auto_play_active: return 
-            
             if self.ceil_val > 0 and self.bankroll >= self.ceil_val: 
                 self.auto_play_active = False; self.advice_msg = "CEILING HIT: CASH OUT!"; self.act_toggle_auto_play()
                 if self.auto_play_active: return
@@ -966,8 +1076,25 @@ class IGT_Machine:
             if win_val > 0: self.sound.play("win"); self.last_win_rank = rank; self.win_target = win_val; self.bankroll += win_val
             else: self.last_win_rank = None
             bet_val = (self.coins_bet * self.denom)
-            # --- UPDATED: Pass Raw Rank Code for lookup map ---
+            
+            # --- DATA COLLECTION PACKET ---
+            data_packet = {
+                'id': self.hands_played, 'variant': self.sim.variant,
+                'bank_start': self.bankroll - win_val + bet_val, # Reconstruct start bank
+                'denom': self.denom, 'coins': self.coins_bet, 'cost': bet_val,
+                'deal': self.deal_snapshot, 'final': list(self.hand),
+                'held_idx': logged_held_indices, 
+                'auto_hold': self.auto_hold_active or self.auto_play_active,
+                'rank': rank, 'win': win_val,
+                'ev_user': user_ev_disp, 'ev_max': max_ev_disp
+            }
+            
             self.log_panel.add_entry(self.hands_played, self.deal_snapshot, list(self.hand), logged_held_indices, {'user': user_ev_disp, 'max': max_ev_disp}, {'win': win_val, 'rank': rank}, bet_val)
+            
+            # --- SEND TO DISK ---
+            if self.logging_enabled:
+                self.logger.log_hand(data_packet)
+                
             self.graph_panel.add_point(self.bankroll)
             self.state = "IDLE"; self.btn_deal.text = "DEAL"
 
@@ -1003,7 +1130,6 @@ class IGT_Machine:
         if self.vol_btn.check_click(pos): return
         
         # Check Cash Out (Only if Limit Reached AND Not Cashed Out)
-        # --- FIXED: CHECK FOR CASHED OUT STATE ---
         if self.is_limit_reached and not self.cashed_out and self.btn_cash_out.rect.collidepoint(pos):
             self.btn_cash_out.callback()
             return
@@ -1058,7 +1184,6 @@ class IGT_Machine:
         for b in self.buttons: b.update(mouse_pos, mouse_down); b.draw(self.screen, self.assets.font_ui)
         
         # Draw Cash Out Button (Only if Limit Reached AND Not Cashed Out)
-        # --- FIXED: CHECK FOR CASHED OUT STATE ---
         if self.is_limit_reached and not self.cashed_out:
             self.btn_cash_out.update(mouse_pos, mouse_down)
             self.btn_cash_out.draw(self.screen, self.assets.font_ui)

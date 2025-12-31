@@ -69,12 +69,59 @@ def holds_straight_flush(ranks, suits, hand):
     if not natural_indices: return hand 
     natural_ranks = sorted([ranks[i] for i in natural_indices])
     
+    # Check standard span
     if (natural_ranks[-1] - natural_ranks[0]) <= 4:
         if len(set(natural_ranks)) == len(natural_ranks): return hand
+    
+    # Check wheel span (A-2-3-4-5) where A=14 becomes 1
     if 14 in natural_ranks:
         wheel_ranks = sorted([1 if r == 14 else r for r in natural_ranks])
         if (wheel_ranks[-1] - wheel_ranks[0]) <= 4:
             if len(set(wheel_ranks)) == len(wheel_ranks): return hand
+    return None
+
+def _holds_wild_sf_3_strict(ranks, suits, hand):
+    """
+    Special strict detector for 3-card Wild Straight Flushes (1 Deuce + 2 Naturals).
+    Enforces TIGHT connectivity (Span <= 2) to avoid holding garbage like 4-8-2.
+    """
+    # 1. Must be exactly 3 cards
+    if len(ranks) != 3: return None
+    
+    # 2. Must be 1 Deuce + 2 Naturals
+    deuces = ranks.count(2)
+    if deuces != 1: return None
+    
+    natural_indices = [i for i, r in enumerate(ranks) if r != 2]
+    
+    # 3. Naturals Must be Suited
+    s1 = suits[natural_indices[0]]
+    s2 = suits[natural_indices[1]]
+    if s1 != s2: return None
+    
+    # 4. Check Connectivity (The "Span" Test)
+    r1 = ranks[natural_indices[0]]
+    r2 = ranks[natural_indices[1]]
+    
+    low, high = sorted((r1, r2))
+    
+    # Standard Span
+    span = high - low
+    
+    # Wheel Case (Ace = 14)
+    if high == 14:
+        # If low is 3, 4, 5... Ace connects as 1.
+        # But if low is K, Q... Ace connects as 14.
+        if low <= 5: # Wheel attempt
+            span = low - 1 # (e.g. 3 - 1 = 2)
+    
+    # CRITICAL FIX: Only allow span <= 2 (Connected or 1 Gap)
+    # 6,7 (Span 1) -> OK
+    # 6,8 (Span 2) -> OK
+    # 6,9 (Span 3) -> REJECT (Hold Deuce Only)
+    if span <= 2:
+        return hand
+        
     return None
 
 def holds_straight(ranks, suits, hand):
@@ -163,6 +210,12 @@ def holds_4_to_straight_flush_conn(ranks, suits, hand):
 def holds_3_to_straight_flush_conn(ranks, suits, hand):
     return _find_best_subset_by_rule(ranks, suits, hand, holds_straight_flush, 3)
 
+def holds_3_to_straight_flush_conn_strict(ranks, suits, hand):
+    """
+    STRICT VERSION for NSUD/AIRPORT: Rejects gaps > 1 (e.g. 4-8-W).
+    """
+    return _find_best_subset_by_rule(ranks, suits, hand, _holds_wild_sf_3_strict, 3)
+
 def holds_4_to_flush(ranks, suits, hand):
     return _find_best_subset_by_rule(ranks, suits, hand, holds_flush, 4)
 
@@ -203,7 +256,7 @@ STRATEGY_NSUD = {
     4: [holds_natural_royal, holds_4_deuces],
     3: [
         holds_wild_royal, 
-        holds_five_of_a_kind,   # CORRECTED: 5OAK > 3 Deuces in NSUD (Pays 16 vs EV ~15.9)
+        holds_five_of_a_kind,   # 5OAK > 3 Deuces in NSUD
         holds_3_deuces
     ],
     2: [holds_wild_royal, holds_five_of_a_kind, holds_straight_flush, holds_4_to_royal, holds_4_to_straight_flush_conn, holds_2_deuces],
@@ -213,14 +266,16 @@ STRATEGY_NSUD = {
         holds_4_to_straight_flush_conn, 
         holds_four_of_a_kind,
         holds_flush, holds_straight, holds_3_of_a_kind, 
-        holds_3_to_royal, holds_3_to_straight_flush_conn, holds_1_deuce
+        holds_3_to_royal, 
+        # UPDATED: Use STRICT version for NSUD
+        holds_3_to_straight_flush_conn_strict, 
+        holds_1_deuce
     ],
     0: [
         holds_natural_royal, holds_4_to_royal, holds_straight_flush, 
         holds_4_to_straight_flush_conn, holds_3_to_royal, holds_full_house, 
         holds_flush, holds_straight, holds_3_of_a_kind, holds_4_to_flush, 
         holds_any_pair, holds_4_to_straight, 
-        # holds_2_to_royal,  <-- REMOVED: Discard All is better than 2 to Royal in almost all non-jackpot variants
         discard_all
     ],
 }
@@ -237,7 +292,9 @@ STRATEGY_BONUS_DEUCES_10_4 = {
         holds_four_of_a_kind,
         holds_flush,
         holds_3_of_a_kind,
-        holds_3_to_straight_flush_conn, # (Straight Trap Fix)
+        # Note: Bonus Deuces is generally looser, but can use strict if needed. 
+        # Keeping standard for now unless testing proves otherwise.
+        holds_3_to_straight_flush_conn, 
         holds_straight,
         holds_1_deuce,
         holds_3_to_royal
@@ -268,14 +325,15 @@ STRATEGY_AIRPORT = {
         holds_4_to_straight_flush_conn, 
         holds_four_of_a_kind,
         holds_flush, holds_straight, holds_3_of_a_kind, holds_3_to_royal, 
-        holds_3_to_straight_flush_conn, holds_1_deuce
+        # UPDATED: Use STRICT version for AIRPORT (Fixed Span Error)
+        holds_3_to_straight_flush_conn_strict, 
+        holds_1_deuce
     ],
     0: [
         holds_natural_royal, holds_4_to_royal, holds_straight_flush, 
         holds_4_to_straight_flush_conn, holds_3_to_royal, holds_full_house, 
         holds_flush, holds_straight, holds_3_of_a_kind, holds_4_to_flush, 
         holds_any_pair, holds_4_to_straight, 
-        # holds_2_to_royal, <-- REMOVED
         discard_all
     ],
 }
@@ -284,7 +342,7 @@ STRATEGY_AIRPORT = {
 STRATEGY_LOOSE_DEUCES = {
     4: [holds_natural_royal, holds_4_deuces],
     3: [
-        holds_3_deuces,
+        holds_3_deuces,         # Priority over everything
         holds_wild_royal, 
         holds_five_of_a_kind
     ],
@@ -298,14 +356,16 @@ STRATEGY_LOOSE_DEUCES = {
         holds_4_to_straight_flush_conn, 
         holds_four_of_a_kind,
         holds_flush, holds_straight, holds_3_of_a_kind, holds_3_to_royal, 
-        holds_3_to_straight_flush_conn, holds_1_deuce
+        # Loose Deuces pays well for 4 Deuces, so holding just the Deuce is often better 
+        # than a weak SF draw. Strict is safer here too.
+        holds_3_to_straight_flush_conn_strict, 
+        holds_1_deuce
     ],
     0: [
         holds_natural_royal, holds_4_to_royal, holds_straight_flush, 
         holds_4_to_straight_flush_conn, holds_3_to_royal, holds_full_house, 
         holds_flush, holds_straight, holds_3_of_a_kind, holds_4_to_flush, 
         holds_any_pair, holds_4_to_straight, 
-        # holds_2_to_royal, <-- REMOVED
         discard_all
     ],
 }
@@ -329,14 +389,15 @@ STRATEGY_DBW = {
         holds_4_to_straight_flush_conn,
         holds_four_of_a_kind,
         holds_3_of_a_kind, holds_straight, holds_3_to_royal, 
-        holds_3_to_straight_flush_conn, holds_1_deuce
+        # DBW likely benefits from strict too, given the bonus structure favoring 5OAK
+        holds_3_to_straight_flush_conn_strict, 
+        holds_1_deuce
     ],
     0: [
         holds_natural_royal, holds_4_to_royal, holds_straight_flush, 
         holds_4_to_straight_flush_conn, holds_3_to_royal, holds_full_house, 
         holds_flush, holds_straight, holds_3_of_a_kind, holds_4_to_flush, 
         holds_any_pair, 
-        # holds_2_to_royal, <-- REMOVED
         holds_one_ace, 
         discard_all
     ],
