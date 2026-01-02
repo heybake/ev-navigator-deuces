@@ -99,9 +99,2225 @@ class SessionLogger:
         self.active = False
 
 # ==============================================================================
-# 📊 SESSION STATS SCREEN (With File Manager & Pro Graphs)
+# 📊 SESSION STATS SCREEN (With Sub-Tab Graph Selector)
 # ==============================================================================
 class SessionStatsScreen:
+    def __init__(self, rect, assets, machine):
+        self.rect = rect
+        self.assets = assets
+        self.machine = machine
+        self.active_tab = "OVERVIEW"
+        self.tabs = ["OVERVIEW", "STRATEGY", "LUCK", "HITS", "GRAPHS", "LOGS"]
+        self.tab_buttons = []
+        
+        # Graph State
+        self.graph_mode = "LUCK" # Options: "LUCK", "SKILL"
+        self.graph_buttons = [] # Initialized in _init_ui
+        
+        # Log Management
+        self.log_files = [] 
+        self.selected_filename = None 
+        
+        self.stats = {}
+        self.hit_stats = [] 
+        self.session_data = [] 
+        self.current_filename = "Active Session"
+        self._init_ui()
+
+    def _init_ui(self):
+        # 1. Main Tabs
+        tab_w = s(140) 
+        tab_h = s(50)
+        total_w = len(self.tabs) * tab_w
+        start_x = self.rect.centerx - (total_w // 2)
+        y = self.rect.top + s(60)
+        
+        self.tab_buttons = []
+        for i, tab in enumerate(self.tabs):
+            self.tab_buttons.append({
+                "rect": pygame.Rect(start_x + (i * tab_w), y, tab_w, tab_h),
+                "label": tab,
+                "action": lambda t=tab: self._set_tab(t)
+            })
+            
+        # 2. Graph Sub-Buttons (Centered inside the content area)
+        # We position them assuming the panel is drawn.
+        # They are roughly at y + 100
+        g_btn_w = s(160)
+        g_btn_h = s(40)
+        g_y = self.rect.top + s(160) # Top of graph area
+        center = self.rect.centerx
+        
+        self.btn_graph_luck = PhysicalButton(
+            pygame.Rect(center - g_btn_w - s(10), g_y, g_btn_w, g_btn_h),
+            "LUCK PLOT", lambda: self._set_graph_mode("LUCK")
+        )
+        self.btn_graph_skill = PhysicalButton(
+            pygame.Rect(center + s(10), g_y, g_btn_w, g_btn_h),
+            "SKILL PLOT", lambda: self._set_graph_mode("SKILL")
+        )
+            
+        # 3. Close Button
+        self.btn_close = PhysicalButton(
+            pygame.Rect(self.rect.centerx - s(60), self.rect.bottom - s(80), s(120), s(50)),
+            "CLOSE", self._close, color=C_DIGITAL_RED
+        )
+
+    def _set_tab(self, tab):
+        self.active_tab = tab
+        if tab == "LOGS": self._scan_logs()
+        self.machine.sound.play("bet")
+
+    def _set_graph_mode(self, mode):
+        self.graph_mode = mode
+        self.machine.sound.play("bet")
+
+    def _close(self):
+        self.machine.state = "IDLE"
+        self.machine.sound.play("bet")
+
+    def _scan_logs(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, "logs")
+        self.log_files = []
+        if os.path.exists(log_dir):
+            raw_files = [f for f in os.listdir(log_dir) if f.endswith(".csv")]
+            raw_files.sort(reverse=True) 
+            for f in raw_files:
+                path = os.path.join(log_dir, f); is_empty = False
+                try:
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        if len(fh.readlines()) <= 1: is_empty = True
+                except: is_empty = True 
+                self.log_files.append({'name': f, 'empty': is_empty})
+
+    def _delete_log(self, filename):
+        if self.machine.logger.active and self.machine.logger.filepath:
+            if filename == os.path.basename(self.machine.logger.filepath):
+                print("Cannot delete active session log."); self.machine.sound.play("bet"); return
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename)
+        try:
+            os.remove(path); self.machine.sound.play("bet"); self._scan_logs()
+            if filename == self.current_filename: self.stats = {}; self.session_data = []; self.current_filename = "Deleted File"
+            if filename == self.selected_filename: self.selected_filename = None
+        except Exception as e: print(f"Error deleting file: {e}")
+
+    def load_active_session(self):
+        raw_data = self.machine.log_panel.logs[::-1]
+        if not raw_data: self.stats = {}; self.session_data = []; self.active_tab = "LOGS"; self._scan_logs(); return
+        self.current_filename = "Active Session"; self._calculate_stats(raw_data); self.active_tab = "OVERVIEW"
+
+    def load_from_file(self, filename):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename); data = []
+        try:
+            with open(path, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    deal = [row[f'Deal_{i}'] for i in range(1,6)]
+                    final = [row[f'Final_{i}'] for i in range(1,6)]
+                    held_str = row['Held_Indices'].replace('[','').replace(']','').replace(' ','')
+                    held_idx = [int(x) for x in held_str.split(',')] if held_str else []
+                    entry = {
+                        'id': int(row['HandID']), 'variant': row['Variant'], 'time': row.get('Time', ''),
+                        'bank_start': float(row['Bankroll_Start']), 'denom': float(row['Denom']), 'bet': float(row['Bet_Cost']),
+                        'deal': deal, 'final': final, 'held_idx': held_idx,
+                        'ev': {'user': float(row['EV_User']), 'max': float(row['EV_Max'])},
+                        'result': {'rank': row['Result_Rank'], 'win': float(row['Win_Amt'])}
+                    }
+                    data.append(entry)
+            self.current_filename = filename; self._calculate_stats(data); self.active_tab = "OVERVIEW"; self.machine.sound.play("rollup")
+        except Exception as e: print(f"Failed to load log: {e}")
+
+    def _calculate_stats(self, data):
+        self.session_data = data 
+        total_hands = len(data)
+        if total_hands == 0: return
+
+        variant = data[0].get('variant', 'Unknown')
+        start_time = data[0].get('time', 'Unknown')
+        total_bet = sum(d['bet'] for d in data)
+        total_won = sum(d['result']['win'] for d in data)
+        net = total_won - total_bet
+        rtp = (total_won / total_bet * 100) if total_bet > 0 else 0
+        
+        errors = 0; cost_errors = 0.0; perfect_hands = 0
+        err_1deuce = 0; count_1deuce = 0; err_pairs = 0; count_pairs = 0
+        err_flush = 0; count_flush = 0; err_3royal = 0; count_3royal = 0 
+        expected_return_dollars = 0.0 
+        
+        for d in data:
+            user_ev_coins = d['ev']['user']; max_ev_coins = d['ev']['max']; denom_val = d['denom']
+            expected_return_dollars += user_ev_coins * denom_val
+            diff = max_ev_coins - user_ev_coins
+            if diff > 0.0001: errors += 1; cost_errors += (diff * denom_val)
+            else: perfect_hands += 1
+                
+            deuces = sum(1 for c in d['deal'] if c[0] == '2')
+            if deuces == 1:
+                count_1deuce += 1
+                if diff > 0.0001: err_1deuce += 1
+            elif deuces == 0:
+                ranks = [c[0] for c in d['deal']]; suits = [c[1] for c in d['deal']]
+                rank_set = set(ranks); suit_counts = {s: suits.count(s) for s in set(suits)}
+                if len(rank_set) < 5: 
+                    count_pairs += 1
+                    if diff > 0.0001: err_pairs += 1
+                if 4 in suit_counts.values():
+                    count_flush += 1
+                    if diff > 0.0001: err_flush += 1
+                for s_key, count in suit_counts.items():
+                    if count >= 3:
+                        suited_ranks = [r for i, r in enumerate(ranks) if suits[i] == s_key]
+                        royals = sum(1 for r in suited_ranks if r in ['T','J','Q','K','A','10','11','12','13','14'])
+                        if royals == 3:
+                            count_3royal += 1
+                            if diff > 0.0001: err_3royal += 1
+                            break 
+
+        perfect_pct = (perfect_hands / total_hands) * 100
+        luck_diff = total_won - expected_return_dollars
+
+        self.stats = {
+            'variant': variant, 'time': start_time, 'hands': total_hands, 'net': net, 'rtp': rtp,
+            'perfect_pct': perfect_pct, 'errors': errors, 'cost': cost_errors, 'ev_gen': expected_return_dollars, 
+            'luck': luck_diff, 'err_1d': (err_1deuce, count_1deuce), 'err_pair': (err_pairs, count_pairs),
+            'err_flush': (err_flush, count_flush), 'err_3royal': (err_3royal, count_3royal)
+        }
+        self.hit_stats = dw_stats_helper.compute_hit_stats(data)
+
+    def handle_click(self, pos):
+        # 1. Main Tabs
+        for btn in self.tab_buttons:
+            if btn["rect"].collidepoint(pos): btn["action"](); return
+            
+        # 2. Close Button
+        if self.btn_close.rect.collidepoint(pos): self.btn_close.callback(); return
+
+        # 3. Graph Sub-Tabs (Only if active)
+        if self.active_tab == "GRAPHS":
+            if self.btn_graph_luck.rect.collidepoint(pos): self.btn_graph_luck.callback(); return
+            if self.btn_graph_skill.rect.collidepoint(pos): self.btn_graph_skill.callback(); return
+
+        # 4. Log File Interaction
+        if self.active_tab == "LOGS":
+            panel_rect = self.rect.inflate(s(-100), s(-100))
+            content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+            start_y = content_rect.top; line_h = s(55)
+            
+            for i, file_data in enumerate(self.log_files):
+                if i > 8: break 
+                f_name = file_data['name']; is_empty = file_data['empty']
+                y = start_y + (i * line_h)
+                btn_w, btn_h = s(80), s(35); btn_y = y + s(10)
+                
+                del_rect = pygame.Rect(content_rect.right - s(100), btn_y, btn_w, btn_h)
+                load_rect = pygame.Rect(content_rect.right - s(200), btn_y, btn_w, btn_h)
+                row_rect = pygame.Rect(content_rect.left, y, content_rect.width, line_h)
+                
+                if del_rect.collidepoint(pos): self._delete_log(f_name); return
+                elif load_rect.collidepoint(pos):
+                    if not is_empty: self.load_from_file(f_name)
+                    else: self.machine.sound.play("bet")
+                    return
+                elif row_rect.collidepoint(pos): self.selected_filename = f_name; self.machine.sound.play("bet"); return
+
+    def draw(self, screen):
+        s_surf = pygame.Surface((PHYSICAL_W, PHYSICAL_H), pygame.SRCALPHA); s_surf.fill((0, 0, 0, 230)); screen.blit(s_surf, (0,0))
+        panel_rect = self.rect.inflate(s(-100), s(-100))
+        pygame.draw.rect(screen, C_PANEL_BG, panel_rect, border_radius=s(12))
+        pygame.draw.rect(screen, C_IGT_GOLD, panel_rect, s(3), border_radius=s(12))
+
+        title = self.assets.font_vfd.render(f"SESSION REPORT: {self.current_filename}", True, C_IGT_GOLD)
+        screen.blit(title, title.get_rect(center=(self.rect.centerx, self.rect.top + s(30))))
+
+        mouse_pos = pygame.mouse.get_pos()
+        for btn in self.tab_buttons:
+            r = btn["rect"]; hover = r.collidepoint(mouse_pos); is_active = (btn["label"] == self.active_tab)
+            col = C_IGT_TXT_SEL if is_active else (C_BTN_FACE if not hover else (200, 200, 255))
+            pygame.draw.rect(screen, col, r, border_radius=s(6)); pygame.draw.rect(screen, C_BLACK, r, s(2), border_radius=s(6))
+            txt = self.assets.font_ui.render(btn["label"], True, C_BLACK); screen.blit(txt, txt.get_rect(center=r.center))
+
+        content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+
+        if self.active_tab == "LOGS": self._draw_logs_tab(screen, content_rect)
+        elif not self.stats: msg = self.assets.font_ui.render("NO DATA LOADED", True, C_WHITE); screen.blit(msg, msg.get_rect(center=content_rect.center))
+        elif self.active_tab == "OVERVIEW": self._draw_overview(screen, content_rect)
+        elif self.active_tab == "STRATEGY": self._draw_strategy(screen, content_rect)
+        elif self.active_tab == "LUCK": self._draw_luck(screen, content_rect)
+        elif self.active_tab == "HITS": self._draw_hits(screen, content_rect)
+        elif self.active_tab == "GRAPHS": self._draw_graphs_tab(screen, content_rect)
+
+        self.btn_close.update(mouse_pos, pygame.mouse.get_pressed()[0]); self.btn_close.draw(screen, self.assets.font_ui)
+
+    def _draw_overview(self, screen, rect):
+        stats = self.stats
+        v_name = stats.get('variant', 'Unknown'); t_stamp = stats.get('time', 'Unknown')
+        header_y = rect.top
+        info_str = f"GAME: {v_name}   |   STARTED: {t_stamp}"
+        info_surf = self.assets.font_ui.render(info_str, True, C_IGT_GOLD)
+        screen.blit(info_surf, info_surf.get_rect(center=(rect.centerx, header_y)))
+        pygame.draw.line(screen, (80, 80, 80), (rect.left + s(20), header_y + s(30)), (rect.right - s(20), header_y + s(30)), 2)
+
+        col1 = rect.left + s(50); col2 = rect.centerx + s(50); y = rect.top + s(60); gap = s(50)
+        self._draw_metric(screen, "TOTAL HANDS", str(stats['hands']), col1, y, C_WHITE); y += gap
+        self._draw_metric(screen, "NET PROFIT", f"${stats['net']:.2f}", col1, y, C_DIGITAL_GRN if stats['net'] >= 0 else C_DIGITAL_RED); y += gap
+        self._draw_metric(screen, "ACTUAL RTP", f"{stats['rtp']:.1f}%", col1, y, C_YEL_TEXT)
+        y = rect.top + s(60)
+        grade_col = C_DIGITAL_GRN if stats['perfect_pct'] > 99 else (C_YEL_TEXT if stats['perfect_pct'] > 95 else C_DIGITAL_RED)
+        self._draw_metric(screen, "ACCURACY", f"{stats['perfect_pct']:.2f}%", col2, y, grade_col); y += gap
+        self._draw_metric(screen, "TOTAL ERRORS", str(stats['errors']), col2, y, C_WHITE); y += gap
+        self._draw_metric(screen, "COST OF ERRORS", f"-${stats['cost']:.2f}", col2, y, C_DIGITAL_RED)
+
+    def _draw_strategy(self, screen, rect):
+        stats = self.stats; x = rect.left + s(50); y = rect.top + s(20); gap = s(45) 
+        screen.blit(self.assets.font_ui.render("LEAK FINDER:", True, C_IGT_GOLD), (x, y)); y += gap + s(10)
+        
+        non_local_y = [y]
+        def draw_row(label, data):
+            err, tot = data; rate = (err/tot*100) if tot > 0 else 0.0
+            col = C_DIGITAL_GRN
+            if rate > 0: col = (255, 200, 0)
+            if rate > 2: col = C_DIGITAL_RED
+            if tot == 0: col = (100, 100, 100) 
+            txt_str = f"{label}: {err} Errors / {tot} ({rate:.1f}%)"
+            screen.blit(self.assets.font_log.render(txt_str, True, col), (x, non_local_y[0]))
+            non_local_y[0] += gap
+
+        draw_row("1-DEUCE HANDS", stats.get('err_1d', (0,0)))
+        draw_row("PAIR HANDS (0 Deuces)", stats.get('err_pair', (0,0)))
+        draw_row("FLUSH TRAPS (4-Suited)", stats.get('err_flush', (0,0)))
+        draw_row("ROYAL TEASES (3-Royal)", stats.get('err_3royal', (0,0)))
+
+    def _draw_luck(self, screen, rect):
+        stats = self.stats; x = rect.left + s(50); y = rect.top + s(20); gap = s(60)
+        expected_net_win = stats['net'] - stats['luck']
+        self._draw_metric(screen, "EXPECTED WIN", f"${expected_net_win:.2f}", x, y, C_CYAN_MSG); y += gap
+        self._draw_metric(screen, "ACTUAL WIN", f"${stats['net']:.2f}", x, y, C_WHITE); y += gap
+        luck = stats['luck']; lbl = "GOOD LUCK" if luck > 0 else "BAD LUCK"; col = C_DIGITAL_GRN if luck > 0 else C_DIGITAL_RED
+        self._draw_metric(screen, "LUCK FACTOR", f"{lbl} (${luck:.2f})", x, y, col)
+
+    def _draw_hits(self, screen, rect):
+        headers = ["HAND", "COUNT", "ACTUAL", "THEO", "DIFF"]
+        x_offsets = [0, 220, 320, 440, 560]; y = rect.top + s(10)
+        for i, h in enumerate(headers): screen.blit(self.assets.font_tiny.render(h, True, C_IGT_GOLD), (rect.left + s(x_offsets[i]), y))
+        y += s(35)
+        if not self.hit_stats: return
+
+        for row in self.hit_stats:
+            col = C_WHITE
+            if row['theo_pct'] is not None:
+                if row['diff'] > 0.05: col = C_DIGITAL_GRN
+                elif row['diff'] < -0.05: col = C_DIGITAL_RED
+            lbl = self.assets.font_log.render(row['label'], True, C_WHITE)
+            cnt = self.assets.font_log.render(str(row['count']), True, C_WHITE)
+            act = self.assets.font_log.render(f"{row['actual_pct']:.2f}%", True, col)
+            theo_str = f"{row['theo_pct']:.2f}%" if row['theo_pct'] is not None else "---"
+            theo = self.assets.font_log.render(theo_str, True, C_SILVER)
+            diff_str = f"{row['diff']:+.2f}%" if row['theo_pct'] is not None else "---"
+            diff = self.assets.font_log.render(diff_str, True, col)
+            screen.blit(lbl, (rect.left + s(x_offsets[0]), y)); screen.blit(cnt, (rect.left + s(x_offsets[1]), y))
+            screen.blit(act, (rect.left + s(x_offsets[2]), y)); screen.blit(theo, (rect.left + s(x_offsets[3]), y))
+            screen.blit(diff, (rect.left + s(x_offsets[4]), y)); y += s(28)
+
+    # --------------------------------------------------------------------------
+    # 📈 THE SWITCHABLE GRAPH RENDERER
+    # --------------------------------------------------------------------------
+    def _draw_graphs_tab(self, screen, rect):
+        if not self.session_data:
+            msg = self.assets.font_ui.render("NO DATA FOR GRAPH", True, C_WHITE)
+            screen.blit(msg, msg.get_rect(center=rect.center)); return
+
+        # 1. Draw Buttons (Top Center)
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_down = pygame.mouse.get_pressed()[0]
+        
+        # Color Logic: Active gets Yellow, Inactive gets Grey
+        self.btn_graph_luck.color = C_IGT_TXT_SEL if self.graph_mode == "LUCK" else C_BTN_FACE
+        self.btn_graph_skill.color = C_IGT_TXT_SEL if self.graph_mode == "SKILL" else C_BTN_FACE
+        
+        self.btn_graph_luck.update(mouse_pos, mouse_down)
+        self.btn_graph_skill.update(mouse_pos, mouse_down)
+        
+        self.btn_graph_luck.draw(screen, self.assets.font_ui)
+        self.btn_graph_skill.draw(screen, self.assets.font_ui)
+
+        # 2. Process Data
+        history_actual = [0.0]; history_expected = [0.0]; history_cost = [0.0]
+        cum_act = 0.0; cum_exp = 0.0; cum_cost = 0.0
+        
+        for d in self.session_data:
+            bet = d['bet']; won = d['result']['win']; denom = d['denom']
+            ev_user_dollars = d['ev']['user'] * denom; ev_max_dollars = d['ev']['max'] * denom
+            cum_act += (won - bet); cum_exp += (ev_user_dollars - bet)
+            cost_hand = ev_max_dollars - ev_user_dollars; cum_cost -= cost_hand 
+            history_actual.append(cum_act); history_expected.append(cum_exp); history_cost.append(cum_cost)
+
+        total_points = len(history_actual)
+
+        # 3. Determine Active Lines & Title based on Mode
+        if self.graph_mode == "LUCK":
+            lines_data = [
+                {'data': history_expected, 'color': C_CYAN_MSG, 'width': 3, 'label': 'Expected'},
+                {'data': history_actual, 'color': C_DIGITAL_GRN, 'width': 2, 'label': 'Actual'}
+            ]
+            title_text = "LUCK: Bankroll Trend"
+        else:
+            lines_data = [
+                {'data': history_cost, 'color': C_RED_ACTIVE, 'width': 3, 'label': 'Cumulative Error Cost'}
+            ]
+            title_text = "SKILL: Error Cost (Zoomed)"
+
+        # 4. Layout Geometry (Below buttons)
+        margin_x = s(60); margin_top = s(60); margin_bottom = s(20)
+        graph_rect = pygame.Rect(rect.left + margin_x, rect.top + margin_top, rect.width - margin_x - s(20), rect.height - margin_top - margin_bottom)
+
+        # 5. Draw Graph Background
+        pygame.draw.rect(screen, (20, 20, 25), graph_rect)
+        pygame.draw.rect(screen, (60, 60, 60), graph_rect, 2)
+        
+        t_surf = self.assets.font_ui.render(title_text, True, C_IGT_GOLD)
+        screen.blit(t_surf, (graph_rect.left, graph_rect.top - s(25)))
+
+        # 6. Calculate Scale (Auto-Scale to Selected Data)
+        all_vals = []
+        for line in lines_data: all_vals.extend(line['data'])
+        
+        # Guard against empty data
+        if not all_vals: return 
+
+        min_val = min(all_vals); max_val = max(all_vals)
+        min_val = min(min_val, 0); max_val = max(max_val, 0) # Force 0 baseline
+        val_range = max_val - min_val; val_range = 10 if val_range == 0 else val_range
+        
+        padding = val_range * 0.1
+        view_min = min_val - padding; view_max = max_val + padding
+        view_h = view_max - view_min
+        
+        # 7. Draw Grid (Y-Axis)
+        raw_step = view_h / 5
+        magnitude = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
+        base_step = raw_step / magnitude
+        if base_step < 2: nice_step = 1 * magnitude
+        elif base_step < 5: nice_step = 2 * magnitude
+        elif base_step < 10: nice_step = 5 * magnitude
+        else: nice_step = 10 * magnitude
+        
+        start_grid = math.ceil(view_min / nice_step) * nice_step; current_grid = start_grid
+        font_axis = self.assets.font_tiny
+        
+        while current_grid <= view_max:
+            norm_y = (current_grid - view_min) / view_h
+            screen_y = graph_rect.bottom - (norm_y * graph_rect.height)
+            if graph_rect.top <= screen_y <= graph_rect.bottom:
+                col = (80, 80, 80) if abs(current_grid) < 0.001 else (40, 40, 50)
+                width = 2 if abs(current_grid) < 0.001 else 1
+                pygame.draw.line(screen, col, (graph_rect.left, screen_y), (graph_rect.right, screen_y), width)
+                
+                # Format Label (Show cents for Skill graph)
+                if self.graph_mode == "SKILL": label_str = f"${current_grid:.2f}"
+                else: label_str = f"${current_grid:.0f}"
+                
+                lbl = font_axis.render(label_str, True, (150, 150, 150))
+                screen.blit(lbl, (graph_rect.left - lbl.get_width() - s(8), screen_y - s(6)))
+            current_grid += nice_step
+
+        # 8. Draw Grid (X-Axis)
+        x_step = max(1, total_points // 6)
+        for i in range(0, total_points, x_step):
+            screen_x = graph_rect.left + (i / (total_points - 1)) * graph_rect.width if total_points > 1 else graph_rect.left
+            pygame.draw.line(screen, (40, 40, 50), (screen_x, graph_rect.top), (screen_x, graph_rect.bottom), 1)
+            lbl = font_axis.render(str(i), True, (150, 150, 150))
+            screen.blit(lbl, (screen_x - (lbl.get_width() // 2), graph_rect.bottom + s(5)))
+
+        # 9. Plot Lines
+        step_x = graph_rect.width / (total_points - 1) if total_points > 1 else 0
+        def to_pos(i, val):
+            x = graph_rect.left + (i * step_x); norm = (val - view_min) / view_h
+            y = graph_rect.bottom - (norm * graph_rect.height)
+            return (x, y)
+            
+        for line in lines_data:
+            pts = [to_pos(i, v) for i, v in enumerate(line['data'])]
+            if len(pts) > 1: pygame.draw.lines(screen, line['color'], False, pts, line['width'])
+
+        # 10. Legend
+        lx = graph_rect.left + s(300); ly = graph_rect.top - s(25)
+        for i, line in enumerate(lines_data):
+            offset_x = i * s(150)
+            pygame.draw.line(screen, line['color'], (lx + offset_x, ly + s(8)), (lx + offset_x + s(20), ly + s(8)), 3)
+            screen.blit(self.assets.font_tiny.render(line['label'], True, line['color']), (lx + offset_x + s(25), ly))
+
+    def _draw_logs_tab(self, screen, rect):
+        start_y = rect.top; line_h = s(55) 
+        if not self.log_files: msg = self.assets.font_ui.render("NO LOG FILES FOUND", True, (150, 150, 150)); screen.blit(msg, msg.get_rect(center=rect.center)); return
+
+        for i, file_data in enumerate(self.log_files):
+            if i > 8: break 
+            f_name = file_data['name']; is_empty = file_data['empty']; y = start_y + (i * line_h)
+            is_current = (f_name == self.current_filename); is_selected = (f_name == self.selected_filename)
+            row_col = (60, 80, 100) if is_selected else ((40, 60, 40) if is_current else ((40, 40, 50) if i % 2 == 0 else (30, 30, 40)))
+            pygame.draw.rect(screen, row_col, (rect.left, y, rect.width, line_h))
+            col = (120, 120, 120) if is_empty else (C_IGT_TXT_SEL if is_current else C_WHITE)
+            display_name = f_name + (" (EMPTY)" if is_empty else "")
+            screen.blit(self.assets.font_log.render(display_name, True, col), (rect.left + s(20), y + s(15)))
+            
+            btn_w, btn_h = s(80), s(35); btn_y = y + s(10)
+            load_rect = pygame.Rect(rect.right - s(200), btn_y, btn_w, btn_h)
+            if not is_empty: pygame.draw.rect(screen, (50, 100, 50), load_rect, border_radius=4); pygame.draw.rect(screen, C_WHITE, load_rect, 1, border_radius=4); lt = self.assets.font_tiny.render("LOAD", True, C_WHITE)
+            else: pygame.draw.rect(screen, (60, 60, 60), load_rect, border_radius=4); lt = self.assets.font_tiny.render("LOAD", True, (100, 100, 100))
+            screen.blit(lt, lt.get_rect(center=load_rect.center))
+            
+            del_rect = pygame.Rect(rect.right - s(100), btn_y, btn_w, btn_h)
+            del_col = (100, 50, 50) if not (self.machine.logger.active and f_name == os.path.basename(self.machine.logger.filepath)) else (60, 60, 60)
+            pygame.draw.rect(screen, del_col, del_rect, border_radius=4); pygame.draw.rect(screen, (150, 150, 150), del_rect, 1, border_radius=4)
+            dt = self.assets.font_tiny.render("DEL", True, (200, 200, 200) if del_col != (60, 60, 60) else (100, 100, 100))
+            screen.blit(dt, dt.get_rect(center=del_rect.center))
+
+    def _draw_metric(self, screen, label, value, x, y, val_color):
+        lbl_surf = self.assets.font_ui.render(label, True, (180, 180, 180))
+        val_surf = self.assets.font_vfd.render(value, True, val_color)
+        screen.blit(lbl_surf, (x, y))
+        screen.blit(val_surf, (x + s(250), y - s(5)))
+    def __init__(self, rect, assets, machine):
+        self.rect = rect
+        self.assets = assets
+        self.machine = machine
+        self.active_tab = "OVERVIEW"
+        self.tabs = ["OVERVIEW", "STRATEGY", "LUCK", "HITS", "GRAPHS", "LOGS"]
+        self.tab_buttons = []
+        
+        # Graph State
+        self.graph_mode = "LUCK" # Options: "LUCK", "SKILL"
+        self.graph_buttons = [] # Initialized in _init_ui
+        
+        # Log Management
+        self.log_files = [] 
+        self.selected_filename = None 
+        
+        self.stats = {}
+        self.hit_stats = [] 
+        self.session_data = [] 
+        self.current_filename = "Active Session"
+        self._init_ui()
+
+    def _init_ui(self):
+        # 1. Main Tabs
+        tab_w = s(140) 
+        tab_h = s(50)
+        total_w = len(self.tabs) * tab_w
+        start_x = self.rect.centerx - (total_w // 2)
+        y = self.rect.top + s(60)
+        
+        self.tab_buttons = []
+        for i, tab in enumerate(self.tabs):
+            self.tab_buttons.append({
+                "rect": pygame.Rect(start_x + (i * tab_w), y, tab_w, tab_h),
+                "label": tab,
+                "action": lambda t=tab: self._set_tab(t)
+            })
+            
+        # 2. Graph Sub-Buttons (Centered inside the content area)
+        # We position them assuming the panel is drawn.
+        # They are roughly at y + 100
+        g_btn_w = s(160)
+        g_btn_h = s(40)
+        g_y = self.rect.top + s(160) # Top of graph area
+        center = self.rect.centerx
+        
+        self.btn_graph_luck = PhysicalButton(
+            pygame.Rect(center - g_btn_w - s(10), g_y, g_btn_w, g_btn_h),
+            "LUCK PLOT", lambda: self._set_graph_mode("LUCK")
+        )
+        self.btn_graph_skill = PhysicalButton(
+            pygame.Rect(center + s(10), g_y, g_btn_w, g_btn_h),
+            "SKILL PLOT", lambda: self._set_graph_mode("SKILL")
+        )
+            
+        # 3. Close Button
+        self.btn_close = PhysicalButton(
+            pygame.Rect(self.rect.centerx - s(60), self.rect.bottom - s(80), s(120), s(50)),
+            "CLOSE", self._close, color=C_DIGITAL_RED
+        )
+
+    def _set_tab(self, tab):
+        self.active_tab = tab
+        if tab == "LOGS": self._scan_logs()
+        self.machine.sound.play("bet")
+
+    def _set_graph_mode(self, mode):
+        self.graph_mode = mode
+        self.machine.sound.play("bet")
+
+    def _close(self):
+        self.machine.state = "IDLE"
+        self.machine.sound.play("bet")
+
+    def _scan_logs(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, "logs")
+        self.log_files = []
+        if os.path.exists(log_dir):
+            raw_files = [f for f in os.listdir(log_dir) if f.endswith(".csv")]
+            raw_files.sort(reverse=True) 
+            for f in raw_files:
+                path = os.path.join(log_dir, f); is_empty = False
+                try:
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        if len(fh.readlines()) <= 1: is_empty = True
+                except: is_empty = True 
+                self.log_files.append({'name': f, 'empty': is_empty})
+
+    def _delete_log(self, filename):
+        if self.machine.logger.active and self.machine.logger.filepath:
+            if filename == os.path.basename(self.machine.logger.filepath):
+                print("Cannot delete active session log."); self.machine.sound.play("bet"); return
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename)
+        try:
+            os.remove(path); self.machine.sound.play("bet"); self._scan_logs()
+            if filename == self.current_filename: self.stats = {}; self.session_data = []; self.current_filename = "Deleted File"
+            if filename == self.selected_filename: self.selected_filename = None
+        except Exception as e: print(f"Error deleting file: {e}")
+
+    def load_active_session(self):
+        raw_data = self.machine.log_panel.logs[::-1]
+        if not raw_data: self.stats = {}; self.session_data = []; self.active_tab = "LOGS"; self._scan_logs(); return
+        self.current_filename = "Active Session"; self._calculate_stats(raw_data); self.active_tab = "OVERVIEW"
+
+    def load_from_file(self, filename):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename); data = []
+        try:
+            with open(path, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    deal = [row[f'Deal_{i}'] for i in range(1,6)]
+                    final = [row[f'Final_{i}'] for i in range(1,6)]
+                    held_str = row['Held_Indices'].replace('[','').replace(']','').replace(' ','')
+                    held_idx = [int(x) for x in held_str.split(',')] if held_str else []
+                    entry = {
+                        'id': int(row['HandID']), 'variant': row['Variant'], 'time': row.get('Time', ''),
+                        'bank_start': float(row['Bankroll_Start']), 'denom': float(row['Denom']), 'bet': float(row['Bet_Cost']),
+                        'deal': deal, 'final': final, 'held_idx': held_idx,
+                        'ev': {'user': float(row['EV_User']), 'max': float(row['EV_Max'])},
+                        'result': {'rank': row['Result_Rank'], 'win': float(row['Win_Amt'])}
+                    }
+                    data.append(entry)
+            self.current_filename = filename; self._calculate_stats(data); self.active_tab = "OVERVIEW"; self.machine.sound.play("rollup")
+        except Exception as e: print(f"Failed to load log: {e}")
+
+    def _calculate_stats(self, data):
+        self.session_data = data 
+        total_hands = len(data)
+        if total_hands == 0: return
+
+        variant = data[0].get('variant', 'Unknown')
+        start_time = data[0].get('time', 'Unknown')
+        total_bet = sum(d['bet'] for d in data)
+        total_won = sum(d['result']['win'] for d in data)
+        net = total_won - total_bet
+        rtp = (total_won / total_bet * 100) if total_bet > 0 else 0
+        
+        errors = 0; cost_errors = 0.0; perfect_hands = 0
+        err_1deuce = 0; count_1deuce = 0; err_pairs = 0; count_pairs = 0
+        err_flush = 0; count_flush = 0; err_3royal = 0; count_3royal = 0 
+        expected_return_dollars = 0.0 
+        
+        for d in data:
+            user_ev_coins = d['ev']['user']; max_ev_coins = d['ev']['max']; denom_val = d['denom']
+            expected_return_dollars += user_ev_coins * denom_val
+            diff = max_ev_coins - user_ev_coins
+            if diff > 0.0001: errors += 1; cost_errors += (diff * denom_val)
+            else: perfect_hands += 1
+                
+            deuces = sum(1 for c in d['deal'] if c[0] == '2')
+            if deuces == 1:
+                count_1deuce += 1
+                if diff > 0.0001: err_1deuce += 1
+            elif deuces == 0:
+                ranks = [c[0] for c in d['deal']]; suits = [c[1] for c in d['deal']]
+                rank_set = set(ranks); suit_counts = {s: suits.count(s) for s in set(suits)}
+                if len(rank_set) < 5: 
+                    count_pairs += 1
+                    if diff > 0.0001: err_pairs += 1
+                if 4 in suit_counts.values():
+                    count_flush += 1
+                    if diff > 0.0001: err_flush += 1
+                for s_key, count in suit_counts.items():
+                    if count >= 3:
+                        suited_ranks = [r for i, r in enumerate(ranks) if suits[i] == s_key]
+                        royals = sum(1 for r in suited_ranks if r in ['T','J','Q','K','A','10','11','12','13','14'])
+                        if royals == 3:
+                            count_3royal += 1
+                            if diff > 0.0001: err_3royal += 1
+                            break 
+
+        perfect_pct = (perfect_hands / total_hands) * 100
+        luck_diff = total_won - expected_return_dollars
+
+        self.stats = {
+            'variant': variant, 'time': start_time, 'hands': total_hands, 'net': net, 'rtp': rtp,
+            'perfect_pct': perfect_pct, 'errors': errors, 'cost': cost_errors, 'ev_gen': expected_return_dollars, 
+            'luck': luck_diff, 'err_1d': (err_1deuce, count_1deuce), 'err_pair': (err_pairs, count_pairs),
+            'err_flush': (err_flush, count_flush), 'err_3royal': (err_3royal, count_3royal)
+        }
+        self.hit_stats = dw_stats_helper.compute_hit_stats(data)
+
+    def handle_click(self, pos):
+        # 1. Main Tabs
+        for btn in self.tab_buttons:
+            if btn["rect"].collidepoint(pos): btn["action"](); return
+            
+        # 2. Close Button
+        if self.btn_close.rect.collidepoint(pos): self.btn_close.callback(); return
+
+        # 3. Graph Sub-Tabs (Only if active)
+        if self.active_tab == "GRAPHS":
+            if self.btn_graph_luck.rect.collidepoint(pos): self.btn_graph_luck.callback(); return
+            if self.btn_graph_skill.rect.collidepoint(pos): self.btn_graph_skill.callback(); return
+
+        # 4. Log File Interaction
+        if self.active_tab == "LOGS":
+            panel_rect = self.rect.inflate(s(-100), s(-100))
+            content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+            start_y = content_rect.top; line_h = s(55)
+            
+            for i, file_data in enumerate(self.log_files):
+                if i > 8: break 
+                f_name = file_data['name']; is_empty = file_data['empty']
+                y = start_y + (i * line_h)
+                btn_w, btn_h = s(80), s(35); btn_y = y + s(10)
+                
+                del_rect = pygame.Rect(content_rect.right - s(100), btn_y, btn_w, btn_h)
+                load_rect = pygame.Rect(content_rect.right - s(200), btn_y, btn_w, btn_h)
+                row_rect = pygame.Rect(content_rect.left, y, content_rect.width, line_h)
+                
+                if del_rect.collidepoint(pos): self._delete_log(f_name); return
+                elif load_rect.collidepoint(pos):
+                    if not is_empty: self.load_from_file(f_name)
+                    else: self.machine.sound.play("bet")
+                    return
+                elif row_rect.collidepoint(pos): self.selected_filename = f_name; self.machine.sound.play("bet"); return
+
+    def draw(self, screen):
+        s_surf = pygame.Surface((PHYSICAL_W, PHYSICAL_H), pygame.SRCALPHA); s_surf.fill((0, 0, 0, 230)); screen.blit(s_surf, (0,0))
+        panel_rect = self.rect.inflate(s(-100), s(-100))
+        pygame.draw.rect(screen, C_PANEL_BG, panel_rect, border_radius=s(12))
+        pygame.draw.rect(screen, C_IGT_GOLD, panel_rect, s(3), border_radius=s(12))
+
+        title = self.assets.font_vfd.render(f"SESSION REPORT: {self.current_filename}", True, C_IGT_GOLD)
+        screen.blit(title, title.get_rect(center=(self.rect.centerx, self.rect.top + s(30))))
+
+        mouse_pos = pygame.mouse.get_pos()
+        for btn in self.tab_buttons:
+            r = btn["rect"]; hover = r.collidepoint(mouse_pos); is_active = (btn["label"] == self.active_tab)
+            col = C_IGT_TXT_SEL if is_active else (C_BTN_FACE if not hover else (200, 200, 255))
+            pygame.draw.rect(screen, col, r, border_radius=s(6)); pygame.draw.rect(screen, C_BLACK, r, s(2), border_radius=s(6))
+            txt = self.assets.font_ui.render(btn["label"], True, C_BLACK); screen.blit(txt, txt.get_rect(center=r.center))
+
+        content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+
+        if self.active_tab == "LOGS": self._draw_logs_tab(screen, content_rect)
+        elif not self.stats: msg = self.assets.font_ui.render("NO DATA LOADED", True, C_WHITE); screen.blit(msg, msg.get_rect(center=content_rect.center))
+        elif self.active_tab == "OVERVIEW": self._draw_overview(screen, content_rect)
+        elif self.active_tab == "STRATEGY": self._draw_strategy(screen, content_rect)
+        elif self.active_tab == "LUCK": self._draw_luck(screen, content_rect)
+        elif self.active_tab == "HITS": self._draw_hits(screen, content_rect)
+        elif self.active_tab == "GRAPHS": self._draw_graphs_tab(screen, content_rect)
+
+        self.btn_close.update(mouse_pos, pygame.mouse.get_pressed()[0]); self.btn_close.draw(screen, self.assets.font_ui)
+
+    def _draw_overview(self, screen, rect):
+        stats = self.stats
+        v_name = stats.get('variant', 'Unknown'); t_stamp = stats.get('time', 'Unknown')
+        header_y = rect.top
+        info_str = f"GAME: {v_name}   |   STARTED: {t_stamp}"
+        info_surf = self.assets.font_ui.render(info_str, True, C_IGT_GOLD)
+        screen.blit(info_surf, info_surf.get_rect(center=(rect.centerx, header_y)))
+        pygame.draw.line(screen, (80, 80, 80), (rect.left + s(20), header_y + s(30)), (rect.right - s(20), header_y + s(30)), 2)
+
+        col1 = rect.left + s(50); col2 = rect.centerx + s(50); y = rect.top + s(60); gap = s(50)
+        self._draw_metric(screen, "TOTAL HANDS", str(stats['hands']), col1, y, C_WHITE); y += gap
+        self._draw_metric(screen, "NET PROFIT", f"${stats['net']:.2f}", col1, y, C_DIGITAL_GRN if stats['net'] >= 0 else C_DIGITAL_RED); y += gap
+        self._draw_metric(screen, "ACTUAL RTP", f"{stats['rtp']:.1f}%", col1, y, C_YEL_TEXT)
+        y = rect.top + s(60)
+        grade_col = C_DIGITAL_GRN if stats['perfect_pct'] > 99 else (C_YEL_TEXT if stats['perfect_pct'] > 95 else C_DIGITAL_RED)
+        self._draw_metric(screen, "ACCURACY", f"{stats['perfect_pct']:.2f}%", col2, y, grade_col); y += gap
+        self._draw_metric(screen, "TOTAL ERRORS", str(stats['errors']), col2, y, C_WHITE); y += gap
+        self._draw_metric(screen, "COST OF ERRORS", f"-${stats['cost']:.2f}", col2, y, C_DIGITAL_RED)
+
+    def _draw_strategy(self, screen, rect):
+        stats = self.stats; x = rect.left + s(50); y = rect.top + s(20); gap = s(45) 
+        screen.blit(self.assets.font_ui.render("LEAK FINDER:", True, C_IGT_GOLD), (x, y)); y += gap + s(10)
+        
+        non_local_y = [y]
+        def draw_row(label, data):
+            err, tot = data; rate = (err/tot*100) if tot > 0 else 0.0
+            col = C_DIGITAL_GRN
+            if rate > 0: col = (255, 200, 0)
+            if rate > 2: col = C_DIGITAL_RED
+            if tot == 0: col = (100, 100, 100) 
+            txt_str = f"{label}: {err} Errors / {tot} ({rate:.1f}%)"
+            screen.blit(self.assets.font_log.render(txt_str, True, col), (x, non_local_y[0]))
+            non_local_y[0] += gap
+
+        draw_row("1-DEUCE HANDS", stats.get('err_1d', (0,0)))
+        draw_row("PAIR HANDS (0 Deuces)", stats.get('err_pair', (0,0)))
+        draw_row("FLUSH TRAPS (4-Suited)", stats.get('err_flush', (0,0)))
+        draw_row("ROYAL TEASES (3-Royal)", stats.get('err_3royal', (0,0)))
+
+    def _draw_luck(self, screen, rect):
+        stats = self.stats; x = rect.left + s(50); y = rect.top + s(20); gap = s(60)
+        expected_net_win = stats['net'] - stats['luck']
+        self._draw_metric(screen, "EXPECTED WIN", f"${expected_net_win:.2f}", x, y, C_CYAN_MSG); y += gap
+        self._draw_metric(screen, "ACTUAL WIN", f"${stats['net']:.2f}", x, y, C_WHITE); y += gap
+        luck = stats['luck']; lbl = "GOOD LUCK" if luck > 0 else "BAD LUCK"; col = C_DIGITAL_GRN if luck > 0 else C_DIGITAL_RED
+        self._draw_metric(screen, "LUCK FACTOR", f"{lbl} (${luck:.2f})", x, y, col)
+
+    def _draw_hits(self, screen, rect):
+        headers = ["HAND", "COUNT", "ACTUAL", "THEO", "DIFF"]
+        x_offsets = [0, 220, 320, 440, 560]; y = rect.top + s(10)
+        for i, h in enumerate(headers): screen.blit(self.assets.font_tiny.render(h, True, C_IGT_GOLD), (rect.left + s(x_offsets[i]), y))
+        y += s(35)
+        if not self.hit_stats: return
+
+        for row in self.hit_stats:
+            col = C_WHITE
+            if row['theo_pct'] is not None:
+                if row['diff'] > 0.05: col = C_DIGITAL_GRN
+                elif row['diff'] < -0.05: col = C_DIGITAL_RED
+            lbl = self.assets.font_log.render(row['label'], True, C_WHITE)
+            cnt = self.assets.font_log.render(str(row['count']), True, C_WHITE)
+            act = self.assets.font_log.render(f"{row['actual_pct']:.2f}%", True, col)
+            theo_str = f"{row['theo_pct']:.2f}%" if row['theo_pct'] is not None else "---"
+            theo = self.assets.font_log.render(theo_str, True, C_SILVER)
+            diff_str = f"{row['diff']:+.2f}%" if row['theo_pct'] is not None else "---"
+            diff = self.assets.font_log.render(diff_str, True, col)
+            screen.blit(lbl, (rect.left + s(x_offsets[0]), y)); screen.blit(cnt, (rect.left + s(x_offsets[1]), y))
+            screen.blit(act, (rect.left + s(x_offsets[2]), y)); screen.blit(theo, (rect.left + s(x_offsets[3]), y))
+            screen.blit(diff, (rect.left + s(x_offsets[4]), y)); y += s(28)
+
+    # --------------------------------------------------------------------------
+    # 📈 THE SWITCHABLE GRAPH RENDERER
+    # --------------------------------------------------------------------------
+    def _draw_graphs_tab(self, screen, rect):
+        if not self.session_data:
+            msg = self.assets.font_ui.render("NO DATA FOR GRAPH", True, C_WHITE)
+            screen.blit(msg, msg.get_rect(center=rect.center)); return
+
+        # 1. Draw Buttons (Top Center)
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_down = pygame.mouse.get_pressed()[0]
+        
+        # Color Logic: Active gets Yellow, Inactive gets Grey
+        self.btn_graph_luck.color = C_IGT_TXT_SEL if self.graph_mode == "LUCK" else C_BTN_FACE
+        self.btn_graph_skill.color = C_IGT_TXT_SEL if self.graph_mode == "SKILL" else C_BTN_FACE
+        
+        self.btn_graph_luck.update(mouse_pos, mouse_down)
+        self.btn_graph_skill.update(mouse_pos, mouse_down)
+        
+        self.btn_graph_luck.draw(screen, self.assets.font_ui)
+        self.btn_graph_skill.draw(screen, self.assets.font_ui)
+
+        # 2. Process Data
+        history_actual = [0.0]; history_expected = [0.0]; history_cost = [0.0]
+        cum_act = 0.0; cum_exp = 0.0; cum_cost = 0.0
+        
+        for d in self.session_data:
+            bet = d['bet']; won = d['result']['win']; denom = d['denom']
+            ev_user_dollars = d['ev']['user'] * denom; ev_max_dollars = d['ev']['max'] * denom
+            cum_act += (won - bet); cum_exp += (ev_user_dollars - bet)
+            cost_hand = ev_max_dollars - ev_user_dollars; cum_cost -= cost_hand 
+            history_actual.append(cum_act); history_expected.append(cum_exp); history_cost.append(cum_cost)
+
+        total_points = len(history_actual)
+
+        # 3. Determine Active Lines & Title based on Mode
+        if self.graph_mode == "LUCK":
+            lines_data = [
+                {'data': history_expected, 'color': C_CYAN_MSG, 'width': 3, 'label': 'Expected'},
+                {'data': history_actual, 'color': C_DIGITAL_GRN, 'width': 2, 'label': 'Actual'}
+            ]
+            title_text = "LUCK: Bankroll Trend"
+        else:
+            lines_data = [
+                {'data': history_cost, 'color': C_RED_ACTIVE, 'width': 3, 'label': 'Cumulative Error Cost'}
+            ]
+            title_text = "SKILL: Error Cost (Zoomed)"
+
+        # 4. Layout Geometry (Below buttons)
+        margin_x = s(60); margin_top = s(60); margin_bottom = s(20)
+        graph_rect = pygame.Rect(rect.left + margin_x, rect.top + margin_top, rect.width - margin_x - s(20), rect.height - margin_top - margin_bottom)
+
+        # 5. Draw Graph Background
+        pygame.draw.rect(screen, (20, 20, 25), graph_rect)
+        pygame.draw.rect(screen, (60, 60, 60), graph_rect, 2)
+        
+        t_surf = self.assets.font_ui.render(title_text, True, C_IGT_GOLD)
+        screen.blit(t_surf, (graph_rect.left, graph_rect.top - s(25)))
+
+        # 6. Calculate Scale (Auto-Scale to Selected Data)
+        all_vals = []
+        for line in lines_data: all_vals.extend(line['data'])
+        
+        # Guard against empty data
+        if not all_vals: return 
+
+        min_val = min(all_vals); max_val = max(all_vals)
+        min_val = min(min_val, 0); max_val = max(max_val, 0) # Force 0 baseline
+        val_range = max_val - min_val; val_range = 10 if val_range == 0 else val_range
+        
+        padding = val_range * 0.1
+        view_min = min_val - padding; view_max = max_val + padding
+        view_h = view_max - view_min
+        
+        # 7. Draw Grid (Y-Axis)
+        raw_step = view_h / 5
+        magnitude = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
+        base_step = raw_step / magnitude
+        if base_step < 2: nice_step = 1 * magnitude
+        elif base_step < 5: nice_step = 2 * magnitude
+        elif base_step < 10: nice_step = 5 * magnitude
+        else: nice_step = 10 * magnitude
+        
+        start_grid = math.ceil(view_min / nice_step) * nice_step; current_grid = start_grid
+        font_axis = self.assets.font_tiny
+        
+        while current_grid <= view_max:
+            norm_y = (current_grid - view_min) / view_h
+            screen_y = graph_rect.bottom - (norm_y * graph_rect.height)
+            if graph_rect.top <= screen_y <= graph_rect.bottom:
+                col = (80, 80, 80) if abs(current_grid) < 0.001 else (40, 40, 50)
+                width = 2 if abs(current_grid) < 0.001 else 1
+                pygame.draw.line(screen, col, (graph_rect.left, screen_y), (graph_rect.right, screen_y), width)
+                
+                # Format Label (Show cents for Skill graph)
+                if self.graph_mode == "SKILL": label_str = f"${current_grid:.2f}"
+                else: label_str = f"${current_grid:.0f}"
+                
+                lbl = font_axis.render(label_str, True, (150, 150, 150))
+                screen.blit(lbl, (graph_rect.left - lbl.get_width() - s(8), screen_y - s(6)))
+            current_grid += nice_step
+
+        # 8. Draw Grid (X-Axis)
+        x_step = max(1, total_points // 6)
+        for i in range(0, total_points, x_step):
+            screen_x = graph_rect.left + (i / (total_points - 1)) * graph_rect.width if total_points > 1 else graph_rect.left
+            pygame.draw.line(screen, (40, 40, 50), (screen_x, graph_rect.top), (screen_x, graph_rect.bottom), 1)
+            lbl = font_axis.render(str(i), True, (150, 150, 150))
+            screen.blit(lbl, (screen_x - (lbl.get_width() // 2), graph_rect.bottom + s(5)))
+
+        # 9. Plot Lines
+        step_x = graph_rect.width / (total_points - 1) if total_points > 1 else 0
+        def to_pos(i, val):
+            x = graph_rect.left + (i * step_x); norm = (val - view_min) / view_h
+            y = graph_rect.bottom - (norm * graph_rect.height)
+            return (x, y)
+            
+        for line in lines_data:
+            pts = [to_pos(i, v) for i, v in enumerate(line['data'])]
+            if len(pts) > 1: pygame.draw.lines(screen, line['color'], False, pts, line['width'])
+
+        # 10. Legend
+        lx = graph_rect.left + s(300); ly = graph_rect.top - s(25)
+        for i, line in enumerate(lines_data):
+            offset_x = i * s(150)
+            pygame.draw.line(screen, line['color'], (lx + offset_x, ly + s(8)), (lx + offset_x + s(20), ly + s(8)), 3)
+            screen.blit(self.assets.font_tiny.render(line['label'], True, line['color']), (lx + offset_x + s(25), ly))
+
+    def _draw_logs_tab(self, screen, rect):
+        start_y = rect.top; line_h = s(55) 
+        if not self.log_files: msg = self.assets.font_ui.render("NO LOG FILES FOUND", True, (150, 150, 150)); screen.blit(msg, msg.get_rect(center=rect.center)); return
+
+        for i, file_data in enumerate(self.log_files):
+            if i > 8: break 
+            f_name = file_data['name']; is_empty = file_data['empty']; y = start_y + (i * line_h)
+            is_current = (f_name == self.current_filename); is_selected = (f_name == self.selected_filename)
+            row_col = (60, 80, 100) if is_selected else ((40, 60, 40) if is_current else ((40, 40, 50) if i % 2 == 0 else (30, 30, 40)))
+            pygame.draw.rect(screen, row_col, (rect.left, y, rect.width, line_h))
+            col = (120, 120, 120) if is_empty else (C_IGT_TXT_SEL if is_current else C_WHITE)
+            display_name = f_name + (" (EMPTY)" if is_empty else "")
+            screen.blit(self.assets.font_log.render(display_name, True, col), (rect.left + s(20), y + s(15)))
+            
+            btn_w, btn_h = s(80), s(35); btn_y = y + s(10)
+            load_rect = pygame.Rect(rect.right - s(200), btn_y, btn_w, btn_h)
+            if not is_empty: pygame.draw.rect(screen, (50, 100, 50), load_rect, border_radius=4); pygame.draw.rect(screen, C_WHITE, load_rect, 1, border_radius=4); lt = self.assets.font_tiny.render("LOAD", True, C_WHITE)
+            else: pygame.draw.rect(screen, (60, 60, 60), load_rect, border_radius=4); lt = self.assets.font_tiny.render("LOAD", True, (100, 100, 100))
+            screen.blit(lt, lt.get_rect(center=load_rect.center))
+            
+            del_rect = pygame.Rect(rect.right - s(100), btn_y, btn_w, btn_h)
+            del_col = (100, 50, 50) if not (self.machine.logger.active and f_name == os.path.basename(self.machine.logger.filepath)) else (60, 60, 60)
+            pygame.draw.rect(screen, del_col, del_rect, border_radius=4); pygame.draw.rect(screen, (150, 150, 150), del_rect, 1, border_radius=4)
+            dt = self.assets.font_tiny.render("DEL", True, (200, 200, 200) if del_col != (60, 60, 60) else (100, 100, 100))
+            screen.blit(dt, dt.get_rect(center=del_rect.center))
+
+    def _draw_metric(self, screen, label, value, x, y, val_color):
+        lbl_surf = self.assets.font_ui.render(label, True, (180, 180, 180))
+        val_surf = self.assets.font_vfd.render(value, True, val_color)
+        screen.blit(lbl_surf, (x, y))
+        screen.blit(val_surf, (x + s(250), y - s(5)))
+    def __init__(self, rect, assets, machine):
+        self.rect = rect
+        self.assets = assets
+        self.machine = machine
+        self.active_tab = "OVERVIEW"
+        self.tabs = ["OVERVIEW", "STRATEGY", "LUCK", "HITS", "GRAPHS", "LOGS"]
+        self.tab_buttons = []
+        
+        # Log Management
+        self.log_files = [] 
+        self.selected_filename = None 
+        
+        self.stats = {}
+        self.hit_stats = [] 
+        self.session_data = [] 
+        self.current_filename = "Active Session"
+        self._init_ui()
+
+    def _init_ui(self):
+        # Tabs
+        tab_w = s(140) 
+        tab_h = s(50)
+        total_w = len(self.tabs) * tab_w
+        start_x = self.rect.centerx - (total_w // 2)
+        y = self.rect.top + s(60)
+        
+        self.tab_buttons = []
+        for i, tab in enumerate(self.tabs):
+            self.tab_buttons.append({
+                "rect": pygame.Rect(start_x + (i * tab_w), y, tab_w, tab_h),
+                "label": tab,
+                "action": lambda t=tab: self._set_tab(t)
+            })
+            
+        # Close Button
+        self.btn_close = PhysicalButton(
+            pygame.Rect(self.rect.centerx - s(60), self.rect.bottom - s(80), s(120), s(50)),
+            "CLOSE", self._close, color=C_DIGITAL_RED
+        )
+
+    def _set_tab(self, tab):
+        self.active_tab = tab
+        if tab == "LOGS":
+            self._scan_logs()
+        self.machine.sound.play("bet")
+
+    def _close(self):
+        self.machine.state = "IDLE"
+        self.machine.sound.play("bet")
+
+    def _scan_logs(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, "logs")
+        self.log_files = []
+        if os.path.exists(log_dir):
+            raw_files = [f for f in os.listdir(log_dir) if f.endswith(".csv")]
+            raw_files.sort(reverse=True) 
+            
+            for f in raw_files:
+                path = os.path.join(log_dir, f)
+                is_empty = False
+                try:
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        if len(fh.readlines()) <= 1: is_empty = True
+                except: is_empty = True 
+                
+                self.log_files.append({'name': f, 'empty': is_empty})
+
+    def _delete_log(self, filename):
+        if self.machine.logger.active and self.machine.logger.filepath:
+            if filename == os.path.basename(self.machine.logger.filepath):
+                print("Cannot delete active session log."); self.machine.sound.play("bet"); return
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename)
+        try:
+            os.remove(path)
+            self.machine.sound.play("bet") 
+            self._scan_logs()
+            if filename == self.current_filename:
+                self.stats = {}; self.session_data = []; self.current_filename = "Deleted File"
+            if filename == self.selected_filename: self.selected_filename = None
+        except Exception as e: print(f"Error deleting file: {e}")
+
+    def load_active_session(self):
+        raw_data = self.machine.log_panel.logs[::-1]
+        if not raw_data:
+            self.stats = {}; self.session_data = []; self.active_tab = "LOGS"; self._scan_logs(); return
+        self.current_filename = "Active Session"
+        self._calculate_stats(raw_data)
+        self.active_tab = "OVERVIEW"
+
+    def load_from_file(self, filename):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename)
+        data = []
+        try:
+            with open(path, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    deal = [row[f'Deal_{i}'] for i in range(1,6)]
+                    final = [row[f'Final_{i}'] for i in range(1,6)]
+                    held_str = row['Held_Indices'].replace('[','').replace(']','').replace(' ','')
+                    held_idx = [int(x) for x in held_str.split(',')] if held_str else []
+                    
+                    entry = {
+                        'id': int(row['HandID']), 'variant': row['Variant'], 'time': row.get('Time', ''),
+                        'bank_start': float(row['Bankroll_Start']), 'denom': float(row['Denom']), 'bet': float(row['Bet_Cost']),
+                        'deal': deal, 'final': final, 'held_idx': held_idx,
+                        'ev': {'user': float(row['EV_User']), 'max': float(row['EV_Max'])},
+                        'result': {'rank': row['Result_Rank'], 'win': float(row['Win_Amt'])}
+                    }
+                    data.append(entry)
+            self.current_filename = filename; self._calculate_stats(data); self.active_tab = "OVERVIEW"; self.machine.sound.play("rollup")
+        except Exception as e: print(f"Failed to load log: {e}")
+
+    def _calculate_stats(self, data):
+        self.session_data = data 
+        total_hands = len(data)
+        if total_hands == 0: return
+
+        variant = data[0].get('variant', 'Unknown')
+        start_time = data[0].get('time', 'Unknown')
+        total_bet = sum(d['bet'] for d in data)
+        total_won = sum(d['result']['win'] for d in data)
+        net = total_won - total_bet
+        rtp = (total_won / total_bet * 100) if total_bet > 0 else 0
+        
+        errors = 0; cost_errors = 0.0; perfect_hands = 0
+        err_1deuce = 0; count_1deuce = 0
+        err_pairs = 0; count_pairs = 0
+        err_flush = 0; count_flush = 0; err_3royal = 0; count_3royal = 0 
+        expected_return_dollars = 0.0 
+        
+        for d in data:
+            user_ev_coins = d['ev']['user']; max_ev_coins = d['ev']['max']; denom_val = d['denom']
+            expected_return_dollars += user_ev_coins * denom_val
+            diff = max_ev_coins - user_ev_coins
+            if diff > 0.0001: errors += 1; cost_errors += (diff * denom_val)
+            else: perfect_hands += 1
+                
+            deuces = sum(1 for c in d['deal'] if c[0] == '2')
+            if deuces == 1:
+                count_1deuce += 1
+                if diff > 0.0001: err_1deuce += 1
+            elif deuces == 0:
+                ranks = [c[0] for c in d['deal']]; suits = [c[1] for c in d['deal']]
+                rank_set = set(ranks); suit_counts = {s: suits.count(s) for s in set(suits)}
+                if len(rank_set) < 5: 
+                    count_pairs += 1
+                    if diff > 0.0001: err_pairs += 1
+                if 4 in suit_counts.values():
+                    count_flush += 1
+                    if diff > 0.0001: err_flush += 1
+                for s_key, count in suit_counts.items():
+                    if count >= 3:
+                        suited_ranks = [r for i, r in enumerate(ranks) if suits[i] == s_key]
+                        royals = sum(1 for r in suited_ranks if r in ['T','J','Q','K','A','10','11','12','13','14'])
+                        if royals == 3:
+                            count_3royal += 1
+                            if diff > 0.0001: err_3royal += 1
+                            break 
+
+        perfect_pct = (perfect_hands / total_hands) * 100
+        luck_diff = total_won - expected_return_dollars
+
+        self.stats = {
+            'variant': variant, 'time': start_time, 'hands': total_hands, 'net': net, 'rtp': rtp,
+            'perfect_pct': perfect_pct, 'errors': errors, 'cost': cost_errors, 'ev_gen': expected_return_dollars, 
+            'luck': luck_diff, 'err_1d': (err_1deuce, count_1deuce), 'err_pair': (err_pairs, count_pairs),
+            'err_flush': (err_flush, count_flush), 'err_3royal': (err_3royal, count_3royal)
+        }
+        self.hit_stats = dw_stats_helper.compute_hit_stats(data)
+
+    def handle_click(self, pos):
+        for btn in self.tab_buttons:
+            if btn["rect"].collidepoint(pos): btn["action"](); return
+        if self.btn_close.rect.collidepoint(pos): self.btn_close.callback(); return
+
+        if self.active_tab == "LOGS":
+            panel_rect = self.rect.inflate(s(-100), s(-100))
+            content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+            start_y = content_rect.top; line_h = s(55)
+            
+            for i, file_data in enumerate(self.log_files):
+                if i > 8: break 
+                f_name = file_data['name']; is_empty = file_data['empty']
+                y = start_y + (i * line_h)
+                btn_w, btn_h = s(80), s(35); btn_y = y + s(10)
+                
+                del_rect = pygame.Rect(content_rect.right - s(100), btn_y, btn_w, btn_h)
+                load_rect = pygame.Rect(content_rect.right - s(200), btn_y, btn_w, btn_h)
+                row_rect = pygame.Rect(content_rect.left, y, content_rect.width, line_h)
+                
+                if del_rect.collidepoint(pos): self._delete_log(f_name); return
+                elif load_rect.collidepoint(pos):
+                    if not is_empty: self.load_from_file(f_name)
+                    else: self.machine.sound.play("bet")
+                    return
+                elif row_rect.collidepoint(pos): self.selected_filename = f_name; self.machine.sound.play("bet"); return
+
+    def draw(self, screen):
+        s_surf = pygame.Surface((PHYSICAL_W, PHYSICAL_H), pygame.SRCALPHA); s_surf.fill((0, 0, 0, 230)); screen.blit(s_surf, (0,0))
+        panel_rect = self.rect.inflate(s(-100), s(-100))
+        pygame.draw.rect(screen, C_PANEL_BG, panel_rect, border_radius=s(12))
+        pygame.draw.rect(screen, C_IGT_GOLD, panel_rect, s(3), border_radius=s(12))
+
+        title = self.assets.font_vfd.render(f"SESSION REPORT: {self.current_filename}", True, C_IGT_GOLD)
+        screen.blit(title, title.get_rect(center=(self.rect.centerx, self.rect.top + s(30))))
+
+        mouse_pos = pygame.mouse.get_pos()
+        for btn in self.tab_buttons:
+            r = btn["rect"]; hover = r.collidepoint(mouse_pos); is_active = (btn["label"] == self.active_tab)
+            col = C_IGT_TXT_SEL if is_active else (C_BTN_FACE if not hover else (200, 200, 255))
+            pygame.draw.rect(screen, col, r, border_radius=s(6)); pygame.draw.rect(screen, C_BLACK, r, s(2), border_radius=s(6))
+            txt = self.assets.font_ui.render(btn["label"], True, C_BLACK); screen.blit(txt, txt.get_rect(center=r.center))
+
+        content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+
+        if self.active_tab == "LOGS": self._draw_logs_tab(screen, content_rect)
+        elif not self.stats: msg = self.assets.font_ui.render("NO DATA LOADED", True, C_WHITE); screen.blit(msg, msg.get_rect(center=content_rect.center))
+        elif self.active_tab == "OVERVIEW": self._draw_overview(screen, content_rect)
+        elif self.active_tab == "STRATEGY": self._draw_strategy(screen, content_rect)
+        elif self.active_tab == "LUCK": self._draw_luck(screen, content_rect)
+        elif self.active_tab == "HITS": self._draw_hits(screen, content_rect)
+        elif self.active_tab == "GRAPHS": self._draw_graphs_tab(screen, content_rect)
+
+        self.btn_close.update(mouse_pos, pygame.mouse.get_pressed()[0]); self.btn_close.draw(screen, self.assets.font_ui)
+
+    def _draw_overview(self, screen, rect):
+        stats = self.stats
+        v_name = stats.get('variant', 'Unknown'); t_stamp = stats.get('time', 'Unknown')
+        header_y = rect.top
+        info_str = f"GAME: {v_name}   |   STARTED: {t_stamp}"
+        info_surf = self.assets.font_ui.render(info_str, True, C_IGT_GOLD)
+        screen.blit(info_surf, info_surf.get_rect(center=(rect.centerx, header_y)))
+        pygame.draw.line(screen, (80, 80, 80), (rect.left + s(20), header_y + s(30)), (rect.right - s(20), header_y + s(30)), 2)
+
+        col1 = rect.left + s(50); col2 = rect.centerx + s(50); y = rect.top + s(60); gap = s(50)
+        self._draw_metric(screen, "TOTAL HANDS", str(stats['hands']), col1, y, C_WHITE); y += gap
+        self._draw_metric(screen, "NET PROFIT", f"${stats['net']:.2f}", col1, y, C_DIGITAL_GRN if stats['net'] >= 0 else C_DIGITAL_RED); y += gap
+        self._draw_metric(screen, "ACTUAL RTP", f"{stats['rtp']:.1f}%", col1, y, C_YEL_TEXT)
+        y = rect.top + s(60)
+        grade_col = C_DIGITAL_GRN if stats['perfect_pct'] > 99 else (C_YEL_TEXT if stats['perfect_pct'] > 95 else C_DIGITAL_RED)
+        self._draw_metric(screen, "ACCURACY", f"{stats['perfect_pct']:.2f}%", col2, y, grade_col); y += gap
+        self._draw_metric(screen, "TOTAL ERRORS", str(stats['errors']), col2, y, C_WHITE); y += gap
+        self._draw_metric(screen, "COST OF ERRORS", f"-${stats['cost']:.2f}", col2, y, C_DIGITAL_RED)
+
+    def _draw_strategy(self, screen, rect):
+        stats = self.stats; x = rect.left + s(50); y = rect.top + s(20); gap = s(45) 
+        screen.blit(self.assets.font_ui.render("LEAK FINDER:", True, C_IGT_GOLD), (x, y)); y += gap + s(10)
+        
+        non_local_y = [y]
+        def draw_row(label, data):
+            err, tot = data; rate = (err/tot*100) if tot > 0 else 0.0
+            col = C_DIGITAL_GRN
+            if rate > 0: col = (255, 200, 0)
+            if rate > 2: col = C_DIGITAL_RED
+            if tot == 0: col = (100, 100, 100) 
+            txt_str = f"{label}: {err} Errors / {tot} ({rate:.1f}%)"
+            screen.blit(self.assets.font_log.render(txt_str, True, col), (x, non_local_y[0]))
+            non_local_y[0] += gap
+
+        draw_row("1-DEUCE HANDS", stats.get('err_1d', (0,0)))
+        draw_row("PAIR HANDS (0 Deuces)", stats.get('err_pair', (0,0)))
+        draw_row("FLUSH TRAPS (4-Suited)", stats.get('err_flush', (0,0)))
+        draw_row("ROYAL TEASES (3-Royal)", stats.get('err_3royal', (0,0)))
+
+    def _draw_luck(self, screen, rect):
+        stats = self.stats; x = rect.left + s(50); y = rect.top + s(20); gap = s(60)
+        expected_net_win = stats['net'] - stats['luck']
+        self._draw_metric(screen, "EXPECTED WIN", f"${expected_net_win:.2f}", x, y, C_CYAN_MSG); y += gap
+        self._draw_metric(screen, "ACTUAL WIN", f"${stats['net']:.2f}", x, y, C_WHITE); y += gap
+        luck = stats['luck']; lbl = "GOOD LUCK" if luck > 0 else "BAD LUCK"; col = C_DIGITAL_GRN if luck > 0 else C_DIGITAL_RED
+        self._draw_metric(screen, "LUCK FACTOR", f"{lbl} (${luck:.2f})", x, y, col)
+
+    def _draw_hits(self, screen, rect):
+        headers = ["HAND", "COUNT", "ACTUAL", "THEO", "DIFF"]
+        x_offsets = [0, 220, 320, 440, 560]; y = rect.top + s(10)
+        for i, h in enumerate(headers): screen.blit(self.assets.font_tiny.render(h, True, C_IGT_GOLD), (rect.left + s(x_offsets[i]), y))
+        y += s(35)
+        if not self.hit_stats: return
+
+        for row in self.hit_stats:
+            col = C_WHITE
+            if row['theo_pct'] is not None:
+                if row['diff'] > 0.05: col = C_DIGITAL_GRN
+                elif row['diff'] < -0.05: col = C_DIGITAL_RED
+            lbl = self.assets.font_log.render(row['label'], True, C_WHITE)
+            cnt = self.assets.font_log.render(str(row['count']), True, C_WHITE)
+            act = self.assets.font_log.render(f"{row['actual_pct']:.2f}%", True, col)
+            theo_str = f"{row['theo_pct']:.2f}%" if row['theo_pct'] is not None else "---"
+            theo = self.assets.font_log.render(theo_str, True, C_SILVER)
+            diff_str = f"{row['diff']:+.2f}%" if row['theo_pct'] is not None else "---"
+            diff = self.assets.font_log.render(diff_str, True, col)
+            screen.blit(lbl, (rect.left + s(x_offsets[0]), y)); screen.blit(cnt, (rect.left + s(x_offsets[1]), y))
+            screen.blit(act, (rect.left + s(x_offsets[2]), y)); screen.blit(theo, (rect.left + s(x_offsets[3]), y))
+            screen.blit(diff, (rect.left + s(x_offsets[4]), y)); y += s(28)
+
+    # --------------------------------------------------------------------------
+    # 📈 THE SPLIT GRAPH RENDERER
+    # --------------------------------------------------------------------------
+    def _draw_graphs_tab(self, screen, rect):
+        if not self.session_data:
+            msg = self.assets.font_ui.render("NO DATA FOR GRAPH", True, C_WHITE)
+            screen.blit(msg, msg.get_rect(center=rect.center)); return
+
+        # 1. Prepare Data
+        history_actual = [0.0]; history_expected = [0.0]; history_cost = [0.0]
+        cum_act = 0.0; cum_exp = 0.0; cum_cost = 0.0
+        
+        for d in self.session_data:
+            bet = d['bet']; won = d['result']['win']; denom = d['denom']
+            ev_user_dollars = d['ev']['user'] * denom; ev_max_dollars = d['ev']['max'] * denom
+            cum_act += (won - bet); cum_exp += (ev_user_dollars - bet)
+            cost_hand = ev_max_dollars - ev_user_dollars; cum_cost -= cost_hand 
+            history_actual.append(cum_act); history_expected.append(cum_exp); history_cost.append(cum_cost)
+
+        total_points = len(history_actual)
+
+        # 2. Layout Geometry (Split Screen)
+        margin_x = s(60); margin_top = s(40); margin_bottom = s(20); gap = s(40)
+        avail_h = rect.height - margin_top - margin_bottom - gap; graph_h = avail_h // 2
+        
+        rect_luck = pygame.Rect(rect.left + margin_x, rect.top + margin_top, rect.width - margin_x - s(20), graph_h)
+        rect_skill = pygame.Rect(rect.left + margin_x, rect_luck.bottom + gap, rect.width - margin_x - s(20), graph_h)
+
+        # 3. Helper: Draw Single Graph
+        def draw_graph(g_rect, title, lines_data, is_skill_graph=False):
+            pygame.draw.rect(screen, (20, 20, 25), g_rect)
+            pygame.draw.rect(screen, (60, 60, 60), g_rect, 2)
+            t_surf = self.assets.font_ui.render(title, True, C_IGT_GOLD)
+            screen.blit(t_surf, (g_rect.left, g_rect.top - s(25)))
+
+            all_vals = []
+            for line in lines_data: all_vals.extend(line['data'])
+            if not all_vals: return
+
+            min_val = min(all_vals); max_val = max(all_vals)
+            min_val = min(min_val, 0); max_val = max(max_val, 0)
+            val_range = max_val - min_val; val_range = 10 if val_range == 0 else val_range
+            padding = val_range * 0.1; view_min = min_val - padding; view_max = max_val + padding; view_h = view_max - view_min
+            
+            raw_step = view_h / 4
+            magnitude = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
+            base_step = raw_step / magnitude
+            if base_step < 2: nice_step = 1 * magnitude
+            elif base_step < 5: nice_step = 2 * magnitude
+            elif base_step < 10: nice_step = 5 * magnitude
+            else: nice_step = 10 * magnitude
+            
+            start_grid = math.ceil(view_min / nice_step) * nice_step; current_grid = start_grid
+            font_axis = self.assets.font_tiny
+            
+            while current_grid <= view_max:
+                norm_y = (current_grid - view_min) / view_h
+                screen_y = g_rect.bottom - (norm_y * g_rect.height)
+                if g_rect.top <= screen_y <= g_rect.bottom:
+                    col = (80, 80, 80) if abs(current_grid) < 0.001 else (40, 40, 50)
+                    width = 2 if abs(current_grid) < 0.001 else 1
+                    pygame.draw.line(screen, col, (g_rect.left, screen_y), (g_rect.right, screen_y), width)
+                    label_str = f"${current_grid:.0f}" if abs(current_grid) >= 0.001 else "$0"
+                    lbl = font_axis.render(label_str, True, (150, 150, 150))
+                    screen.blit(lbl, (g_rect.left - lbl.get_width() - s(8), screen_y - s(6)))
+                current_grid += nice_step
+                
+            x_step = max(1, total_points // 6)
+            for i in range(0, total_points, x_step):
+                screen_x = g_rect.left + (i / (total_points - 1)) * g_rect.width if total_points > 1 else g_rect.left
+                pygame.draw.line(screen, (40, 40, 50), (screen_x, g_rect.top), (screen_x, g_rect.bottom), 1)
+                if is_skill_graph:
+                    lbl = font_axis.render(str(i), True, (150, 150, 150))
+                    screen.blit(lbl, (screen_x - (lbl.get_width() // 2), g_rect.bottom + s(5)))
+
+            step_x = g_rect.width / (total_points - 1) if total_points > 1 else 0
+            def to_pos(i, val):
+                x = g_rect.left + (i * step_x); norm = (val - view_min) / view_h
+                y = g_rect.bottom - (norm * g_rect.height)
+                return (x, y)
+                
+            for line in lines_data:
+                pts = [to_pos(i, v) for i, v in enumerate(line['data'])]
+                if len(pts) > 1: pygame.draw.lines(screen, line['color'], False, pts, line['width'])
+
+        # 4. Draw Graphs
+        luck_lines = [{'data': history_expected, 'color': C_CYAN_MSG, 'width': 3}, {'data': history_actual, 'color': C_DIGITAL_GRN, 'width': 2}]
+        draw_graph(rect_luck, "LUCK: BANKROLL TREND", luck_lines, is_skill_graph=False)
+        
+        skill_lines = [{'data': history_cost, 'color': C_RED_ACTIVE, 'width': 2}]
+        draw_graph(rect_skill, "SKILL: ERROR COST (Cumulative)", skill_lines, is_skill_graph=True)
+
+        # 5. Legends
+        lx = rect_luck.left + s(250); ly = rect_luck.top - s(25)
+        pygame.draw.line(screen, C_CYAN_MSG, (lx, ly+s(8)), (lx+s(20), ly+s(8)), 3); screen.blit(self.assets.font_tiny.render("EXPECTED", True, C_CYAN_MSG), (lx+s(25), ly))
+        pygame.draw.line(screen, C_DIGITAL_GRN, (lx+s(100), ly+s(8)), (lx+s(120), ly+s(8)), 2); screen.blit(self.assets.font_tiny.render("ACTUAL", True, C_DIGITAL_GRN), (lx+s(125), ly))
+        
+        lx = rect_skill.left + s(350); ly = rect_skill.top - s(25)
+        pygame.draw.line(screen, C_RED_ACTIVE, (lx, ly+s(8)), (lx+s(20), ly+s(8)), 2); screen.blit(self.assets.font_tiny.render("ERROR COST", True, C_RED_ACTIVE), (lx+s(25), ly))
+
+    def _draw_logs_tab(self, screen, rect):
+        start_y = rect.top; line_h = s(55) 
+        if not self.log_files: msg = self.assets.font_ui.render("NO LOG FILES FOUND", True, (150, 150, 150)); screen.blit(msg, msg.get_rect(center=rect.center)); return
+
+        for i, file_data in enumerate(self.log_files):
+            if i > 8: break 
+            f_name = file_data['name']; is_empty = file_data['empty']; y = start_y + (i * line_h)
+            is_current = (f_name == self.current_filename); is_selected = (f_name == self.selected_filename)
+            row_col = (60, 80, 100) if is_selected else ((40, 60, 40) if is_current else ((40, 40, 50) if i % 2 == 0 else (30, 30, 40)))
+            pygame.draw.rect(screen, row_col, (rect.left, y, rect.width, line_h))
+            col = (120, 120, 120) if is_empty else (C_IGT_TXT_SEL if is_current else C_WHITE)
+            display_name = f_name + (" (EMPTY)" if is_empty else "")
+            screen.blit(self.assets.font_log.render(display_name, True, col), (rect.left + s(20), y + s(15)))
+            
+            btn_w, btn_h = s(80), s(35); btn_y = y + s(10)
+            load_rect = pygame.Rect(rect.right - s(200), btn_y, btn_w, btn_h)
+            if not is_empty: pygame.draw.rect(screen, (50, 100, 50), load_rect, border_radius=4); pygame.draw.rect(screen, C_WHITE, load_rect, 1, border_radius=4); lt = self.assets.font_tiny.render("LOAD", True, C_WHITE)
+            else: pygame.draw.rect(screen, (60, 60, 60), load_rect, border_radius=4); lt = self.assets.font_tiny.render("LOAD", True, (100, 100, 100))
+            screen.blit(lt, lt.get_rect(center=load_rect.center))
+            
+            del_rect = pygame.Rect(rect.right - s(100), btn_y, btn_w, btn_h)
+            del_col = (100, 50, 50) if not (self.machine.logger.active and f_name == os.path.basename(self.machine.logger.filepath)) else (60, 60, 60)
+            pygame.draw.rect(screen, del_col, del_rect, border_radius=4); pygame.draw.rect(screen, (150, 150, 150), del_rect, 1, border_radius=4)
+            dt = self.assets.font_tiny.render("DEL", True, (200, 200, 200) if del_col != (60, 60, 60) else (100, 100, 100))
+            screen.blit(dt, dt.get_rect(center=del_rect.center))
+
+    def _draw_metric(self, screen, label, value, x, y, val_color):
+        lbl_surf = self.assets.font_ui.render(label, True, (180, 180, 180))
+        val_surf = self.assets.font_vfd.render(value, True, val_color)
+        screen.blit(lbl_surf, (x, y))
+        screen.blit(val_surf, (x + s(250), y - s(5)))
+    def __init__(self, rect, assets, machine):
+        self.rect = rect
+        self.assets = assets
+        self.machine = machine
+        self.active_tab = "OVERVIEW"
+        self.tabs = ["OVERVIEW", "STRATEGY", "LUCK", "HITS", "GRAPHS", "LOGS"]
+        self.tab_buttons = []
+        
+        # Log Management
+        self.log_files = [] 
+        self.selected_filename = None 
+        
+        self.stats = {}
+        self.hit_stats = [] 
+        self.session_data = [] # Stores full hand history for graphs
+        self.current_filename = "Active Session"
+        self._init_ui()
+
+    def _init_ui(self):
+        # Tabs - Squeeze 6 tabs into the same space
+        tab_w = s(140) 
+        tab_h = s(50)
+        total_w = len(self.tabs) * tab_w
+        start_x = self.rect.centerx - (total_w // 2)
+        y = self.rect.top + s(60)
+        
+        self.tab_buttons = []
+        for i, tab in enumerate(self.tabs):
+            self.tab_buttons.append({
+                "rect": pygame.Rect(start_x + (i * tab_w), y, tab_w, tab_h),
+                "label": tab,
+                "action": lambda t=tab: self._set_tab(t)
+            })
+            
+        # Close Button
+        self.btn_close = PhysicalButton(
+            pygame.Rect(self.rect.centerx - s(60), self.rect.bottom - s(80), s(120), s(50)),
+            "CLOSE", self._close, color=C_DIGITAL_RED
+        )
+
+    def _set_tab(self, tab):
+        self.active_tab = tab
+        if tab == "LOGS":
+            self._scan_logs()
+        self.machine.sound.play("bet")
+
+    def _close(self):
+        self.machine.state = "IDLE"
+        self.machine.sound.play("bet")
+
+    def _scan_logs(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, "logs")
+        self.log_files = []
+        if os.path.exists(log_dir):
+            raw_files = [f for f in os.listdir(log_dir) if f.endswith(".csv")]
+            raw_files.sort(reverse=True) 
+            
+            for f in raw_files:
+                path = os.path.join(log_dir, f)
+                is_empty = False
+                try:
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        if len(fh.readlines()) <= 1:
+                            is_empty = True
+                except:
+                    is_empty = True 
+                
+                self.log_files.append({
+                    'name': f,
+                    'empty': is_empty
+                })
+
+    def _delete_log(self, filename):
+        if self.machine.logger.active and self.machine.logger.filepath:
+            active_file = os.path.basename(self.machine.logger.filepath)
+            if filename == active_file:
+                print("Cannot delete active session log.")
+                self.machine.sound.play("bet") 
+                return
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename)
+        try:
+            os.remove(path)
+            self.machine.sound.play("bet") # Standard click for delete
+            self._scan_logs()
+            if filename == self.current_filename:
+                self.stats = {}
+                self.session_data = []
+                self.current_filename = "Deleted File"
+            if filename == self.selected_filename:
+                self.selected_filename = None
+        except Exception as e:
+            print(f"Error deleting file: {e}")
+
+    def load_active_session(self):
+        raw_data = self.machine.log_panel.logs[::-1]
+        if not raw_data:
+            self.stats = {}
+            self.session_data = []
+            self.active_tab = "LOGS" 
+            self._scan_logs()
+            return
+
+        self.current_filename = "Active Session"
+        self._calculate_stats(raw_data)
+        self.active_tab = "OVERVIEW"
+
+    def load_from_file(self, filename):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "logs", filename)
+        data = []
+        try:
+            with open(path, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    deal = [row[f'Deal_{i}'] for i in range(1,6)]
+                    final = [row[f'Final_{i}'] for i in range(1,6)]
+                    
+                    held_str = row['Held_Indices'].replace('[','').replace(']','').replace(' ','')
+                    held_idx = [int(x) for x in held_str.split(',')] if held_str else []
+                    
+                    entry = {
+                        'id': int(row['HandID']),
+                        'variant': row['Variant'],
+                        'time': row.get('Time', ''),
+                        'bank_start': float(row['Bankroll_Start']),
+                        'denom': float(row['Denom']),
+                        'bet': float(row['Bet_Cost']),
+                        'deal': deal, 'final': final,
+                        'held_idx': held_idx,
+                        'ev': {'user': float(row['EV_User']), 'max': float(row['EV_Max'])},
+                        'result': {'rank': row['Result_Rank'], 'win': float(row['Win_Amt'])}
+                    }
+                    data.append(entry)
+            
+            self.current_filename = filename
+            self._calculate_stats(data)
+            self.active_tab = "OVERVIEW"
+            self.machine.sound.play("rollup")
+        except Exception as e:
+            print(f"Failed to load log: {e}")
+
+    def _calculate_stats(self, data):
+        self.session_data = data 
+        total_hands = len(data)
+        if total_hands == 0: return
+
+        variant = data[0].get('variant', 'Unknown')
+        start_time = data[0].get('time', 'Unknown')
+
+        total_bet = sum(d['bet'] for d in data)
+        total_won = sum(d['result']['win'] for d in data)
+        net = total_won - total_bet
+        rtp = (total_won / total_bet * 100) if total_bet > 0 else 0
+        
+        errors = 0; cost_errors = 0.0; perfect_hands = 0
+        err_1deuce = 0; count_1deuce = 0
+        err_pairs = 0; count_pairs = 0
+        err_flush = 0; count_flush = 0    
+        err_3royal = 0; count_3royal = 0 
+        
+        expected_return_dollars = 0.0 
+        
+        for d in data:
+            user_ev_coins = d['ev']['user'] 
+            max_ev_coins = d['ev']['max']
+            denom_val = d['denom']
+            
+            expected_return_dollars += user_ev_coins * denom_val
+            
+            diff = max_ev_coins - user_ev_coins
+            if diff > 0.0001:
+                errors += 1
+                cost_errors += (diff * denom_val)
+            else:
+                perfect_hands += 1
+                
+            deuces = sum(1 for c in d['deal'] if c[0] == '2')
+            
+            # Leak Detection
+            if deuces == 1:
+                count_1deuce += 1
+                if diff > 0.0001: err_1deuce += 1
+            elif deuces == 0:
+                ranks = [c[0] for c in d['deal']]
+                suits = [c[1] for c in d['deal']]
+                rank_set = set(ranks)
+                suit_counts = {s: suits.count(s) for s in set(suits)}
+                
+                if len(rank_set) < 5: 
+                    count_pairs += 1
+                    if diff > 0.0001: err_pairs += 1
+                
+                if 4 in suit_counts.values():
+                    count_flush += 1
+                    if diff > 0.0001: err_flush += 1
+                    
+                for s_key, count in suit_counts.items():
+                    if count >= 3:
+                        suited_ranks = [r for i, r in enumerate(ranks) if suits[i] == s_key]
+                        royals = sum(1 for r in suited_ranks if r in ['T','J','Q','K','A','10','11','12','13','14'])
+                        if royals == 3:
+                            count_3royal += 1
+                            if diff > 0.0001: err_3royal += 1
+                            break 
+
+        perfect_pct = (perfect_hands / total_hands) * 100
+        luck_diff = total_won - expected_return_dollars
+
+        self.stats = {
+            'variant': variant,
+            'time': start_time,
+            'hands': total_hands,
+            'net': net,
+            'rtp': rtp,
+            'perfect_pct': perfect_pct,
+            'errors': errors,
+            'cost': cost_errors,
+            'ev_gen': expected_return_dollars, 
+            'luck': luck_diff,
+            'err_1d': (err_1deuce, count_1deuce),
+            'err_pair': (err_pairs, count_pairs),
+            'err_flush': (err_flush, count_flush),
+            'err_3royal': (err_3royal, count_3royal)
+        }
+        
+        self.hit_stats = dw_stats_helper.compute_hit_stats(data)
+
+    def handle_click(self, pos):
+        for btn in self.tab_buttons:
+            if btn["rect"].collidepoint(pos):
+                btn["action"]()
+                return
+
+        if self.btn_close.rect.collidepoint(pos):
+            self.btn_close.callback()
+            return
+
+        if self.active_tab == "LOGS":
+            # Reconstruct geometry exactly as in draw()
+            panel_rect = self.rect.inflate(s(-100), s(-100))
+            content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+            
+            start_y = content_rect.top
+            line_h = s(55) 
+            
+            for i, file_data in enumerate(self.log_files):
+                if i > 8: break 
+                
+                f_name = file_data['name']
+                is_empty = file_data['empty']
+                y = start_y + (i * line_h)
+                
+                btn_w, btn_h = s(80), s(35)
+                btn_y = y + s(10)
+                del_rect = pygame.Rect(content_rect.right - s(100), btn_y, btn_w, btn_h)
+                load_rect = pygame.Rect(content_rect.right - s(200), btn_y, btn_w, btn_h)
+                row_rect = pygame.Rect(content_rect.left, y, content_rect.width, line_h)
+                
+                if del_rect.collidepoint(pos):
+                    self._delete_log(f_name)
+                    return
+                elif load_rect.collidepoint(pos):
+                    if not is_empty:
+                        self.load_from_file(f_name)
+                    else:
+                        self.machine.sound.play("bet")
+                    return
+                elif row_rect.collidepoint(pos):
+                    self.selected_filename = f_name
+                    self.machine.sound.play("bet")
+                    return
+
+    def draw(self, screen):
+        # Dim Background
+        s_surf = pygame.Surface((PHYSICAL_W, PHYSICAL_H), pygame.SRCALPHA)
+        s_surf.fill((0, 0, 0, 230))
+        screen.blit(s_surf, (0,0))
+
+        # Panel Body
+        panel_rect = self.rect.inflate(s(-100), s(-100))
+        pygame.draw.rect(screen, C_PANEL_BG, panel_rect, border_radius=s(12))
+        pygame.draw.rect(screen, C_IGT_GOLD, panel_rect, s(3), border_radius=s(12))
+
+        # Header
+        title = self.assets.font_vfd.render(f"SESSION REPORT: {self.current_filename}", True, C_IGT_GOLD)
+        screen.blit(title, title.get_rect(center=(self.rect.centerx, self.rect.top + s(30))))
+
+        # Draw Tabs
+        mouse_pos = pygame.mouse.get_pos()
+        for btn in self.tab_buttons:
+            r = btn["rect"]
+            hover = r.collidepoint(mouse_pos)
+            is_active = (btn["label"] == self.active_tab)
+            col = C_IGT_TXT_SEL if is_active else (C_BTN_FACE if not hover else (200, 200, 255))
+            pygame.draw.rect(screen, col, r, border_radius=s(6))
+            pygame.draw.rect(screen, C_BLACK, r, s(2), border_radius=s(6))
+            txt = self.assets.font_ui.render(btn["label"], True, C_BLACK)
+            screen.blit(txt, txt.get_rect(center=r.center))
+
+        # Content Area
+        content_rect = pygame.Rect(panel_rect.left + s(40), panel_rect.top + s(140), panel_rect.width - s(80), panel_rect.height - s(220))
+
+        if self.active_tab == "LOGS":
+            self._draw_logs_tab(screen, content_rect)
+        elif not self.stats:
+            msg = self.assets.font_ui.render("NO DATA LOADED", True, C_WHITE)
+            screen.blit(msg, msg.get_rect(center=content_rect.center))
+        elif self.active_tab == "OVERVIEW":
+            self._draw_overview(screen, content_rect)
+        elif self.active_tab == "STRATEGY":
+            self._draw_strategy(screen, content_rect)
+        elif self.active_tab == "LUCK":
+            self._draw_luck(screen, content_rect)
+        elif self.active_tab == "HITS":
+            self._draw_hits(screen, content_rect)
+        elif self.active_tab == "GRAPHS":
+            self._draw_graphs_tab(screen, content_rect)
+
+        # Close Button
+        self.btn_close.update(mouse_pos, pygame.mouse.get_pressed()[0])
+        self.btn_close.draw(screen, self.assets.font_ui)
+
+    def _draw_overview(self, screen, rect):
+        stats = self.stats
+        
+        v_name = stats.get('variant', 'Unknown')
+        t_stamp = stats.get('time', 'Unknown')
+        
+        header_y = rect.top
+        info_str = f"GAME: {v_name}   |   STARTED: {t_stamp}"
+        info_surf = self.assets.font_ui.render(info_str, True, C_IGT_GOLD)
+        screen.blit(info_surf, info_surf.get_rect(center=(rect.centerx, header_y)))
+        
+        pygame.draw.line(screen, (80, 80, 80), (rect.left + s(20), header_y + s(30)), (rect.right - s(20), header_y + s(30)), 2)
+
+        col1 = rect.left + s(50)
+        col2 = rect.centerx + s(50)
+        y = rect.top + s(60) 
+        gap = s(50)
+
+        self._draw_metric(screen, "TOTAL HANDS", str(stats['hands']), col1, y, C_WHITE)
+        y += gap
+        self._draw_metric(screen, "NET PROFIT", f"${stats['net']:.2f}", col1, y, C_DIGITAL_GRN if stats['net'] >= 0 else C_DIGITAL_RED)
+        y += gap
+        self._draw_metric(screen, "ACTUAL RTP", f"{stats['rtp']:.1f}%", col1, y, C_YEL_TEXT)
+        
+        y = rect.top + s(60)
+        grade_col = C_DIGITAL_GRN if stats['perfect_pct'] > 99 else (C_YEL_TEXT if stats['perfect_pct'] > 95 else C_DIGITAL_RED)
+        self._draw_metric(screen, "ACCURACY", f"{stats['perfect_pct']:.2f}%", col2, y, grade_col)
+        y += gap
+        self._draw_metric(screen, "TOTAL ERRORS", str(stats['errors']), col2, y, C_WHITE)
+        y += gap
+        self._draw_metric(screen, "COST OF ERRORS", f"-${stats['cost']:.2f}", col2, y, C_DIGITAL_RED)
+
+    def _draw_strategy(self, screen, rect):
+        stats = self.stats
+        x = rect.left + s(50)
+        y = rect.top + s(20)
+        gap = s(45) 
+        
+        screen.blit(self.assets.font_ui.render("LEAK FINDER:", True, C_IGT_GOLD), (x, y))
+        y += gap + s(10)
+        
+        def draw_row(label, data):
+            err, tot = data
+            rate = (err/tot*100) if tot > 0 else 0.0
+            
+            col = C_DIGITAL_GRN
+            if rate > 0: col = (255, 200, 0)
+            if rate > 2: col = C_DIGITAL_RED
+            if tot == 0: col = (100, 100, 100) 
+            
+            txt_str = f"{label}: {err} Errors / {tot} ({rate:.1f}%)"
+            screen.blit(self.assets.font_log.render(txt_str, True, col), (x, non_local_y[0]))
+            non_local_y[0] += gap
+
+        non_local_y = [y]
+        
+        draw_row("1-DEUCE HANDS", stats.get('err_1d', (0,0)))
+        draw_row("PAIR HANDS (0 Deuces)", stats.get('err_pair', (0,0)))
+        draw_row("FLUSH TRAPS (4-Suited)", stats.get('err_flush', (0,0)))
+        draw_row("ROYAL TEASES (3-Royal)", stats.get('err_3royal', (0,0)))
+
+    def _draw_luck(self, screen, rect):
+        stats = self.stats
+        x = rect.left + s(50)
+        y = rect.top + s(20)
+        gap = s(60)
+        
+        expected_net_win = stats['net'] - stats['luck']
+        
+        self._draw_metric(screen, "EXPECTED WIN", f"${expected_net_win:.2f}", x, y, C_CYAN_MSG)
+        y += gap
+        self._draw_metric(screen, "ACTUAL WIN", f"${stats['net']:.2f}", x, y, C_WHITE)
+        y += gap
+        
+        luck = stats['luck']
+        lbl = "GOOD LUCK" if luck > 0 else "BAD LUCK"
+        col = C_DIGITAL_GRN if luck > 0 else C_DIGITAL_RED
+        self._draw_metric(screen, "LUCK FACTOR", f"{lbl} (${luck:.2f})", x, y, col)
+
+    def _draw_hits(self, screen, rect):
+        headers = ["HAND", "COUNT", "ACTUAL", "THEO", "DIFF"]
+        x_offsets = [0, 220, 320, 440, 560]
+        y = rect.top + s(10)
+        
+        for i, h in enumerate(headers):
+            screen.blit(self.assets.font_tiny.render(h, True, C_IGT_GOLD), (rect.left + s(x_offsets[i]), y))
+        y += s(35)
+        
+        if not self.hit_stats: return
+
+        for row in self.hit_stats:
+            col = C_WHITE
+            if row['theo_pct'] is not None:
+                if row['diff'] > 0.05: col = C_DIGITAL_GRN
+                elif row['diff'] < -0.05: col = C_DIGITAL_RED
+            
+            lbl = self.assets.font_log.render(row['label'], True, C_WHITE)
+            cnt = self.assets.font_log.render(str(row['count']), True, C_WHITE)
+            act = self.assets.font_log.render(f"{row['actual_pct']:.2f}%", True, col)
+            
+            theo_str = f"{row['theo_pct']:.2f}%" if row['theo_pct'] is not None else "---"
+            theo = self.assets.font_log.render(theo_str, True, C_SILVER)
+            
+            diff_str = f"{row['diff']:+.2f}%" if row['theo_pct'] is not None else "---"
+            diff = self.assets.font_log.render(diff_str, True, col)
+
+            screen.blit(lbl, (rect.left + s(x_offsets[0]), y))
+            screen.blit(cnt, (rect.left + s(x_offsets[1]), y))
+            screen.blit(act, (rect.left + s(x_offsets[2]), y))
+            screen.blit(theo, (rect.left + s(x_offsets[3]), y))
+            screen.blit(diff, (rect.left + s(x_offsets[4]), y))
+            y += s(28)
+
+    def _draw_graphs_tab(self, screen, rect):
+        if not self.session_data:
+            msg = self.assets.font_ui.render("NO DATA FOR GRAPH", True, C_WHITE)
+            screen.blit(msg, msg.get_rect(center=rect.center))
+            return
+
+        # ------------------------------------------------
+        # 1. PROCESS DATA
+        # ------------------------------------------------
+        history_actual = [0.0]
+        history_expected = [0.0]
+        history_cost = [0.0] 
+        
+        cum_act = 0.0
+        cum_exp = 0.0
+        cum_cost = 0.0
+        
+        for d in self.session_data:
+            bet = d['bet']
+            won = d['result']['win']
+            denom = d['denom']
+            
+            # Math: Convert EV coins to dollars
+            ev_user_dollars = d['ev']['user'] * denom
+            ev_max_dollars = d['ev']['max'] * denom
+            
+            # Cumulative Calculations
+            cum_act += (won - bet)
+            cum_exp += (ev_user_dollars - bet)
+            
+            # Cost = (Max EV - User EV). We subtract it to show "Loss".
+            cost_hand = ev_max_dollars - ev_user_dollars
+            cum_cost -= cost_hand 
+            
+            history_actual.append(cum_act)
+            history_expected.append(cum_exp)
+            history_cost.append(cum_cost)
+
+        total_points = len(history_actual)
+
+        # ------------------------------------------------
+        # 2. LAYOUT GEOMETRY (Split Screen)
+        # ------------------------------------------------
+        margin_x = s(60)
+        margin_top = s(40)
+        margin_bottom = s(20)
+        gap = s(40) # Space between graphs
+        
+        # Available height for graphs
+        avail_h = rect.height - margin_top - margin_bottom - gap
+        graph_h = avail_h // 2
+        
+        # Rectangles
+        rect_luck = pygame.Rect(rect.left + margin_x, rect.top + margin_top, rect.width - margin_x - s(20), graph_h)
+        rect_skill = pygame.Rect(rect.left + margin_x, rect_luck.bottom + gap, rect.width - margin_x - s(20), graph_h)
+
+        # ------------------------------------------------
+        # 3. HELPER: DRAW SINGLE GRAPH
+        # ------------------------------------------------
+        def draw_graph(g_rect, title, lines_data, is_skill_graph=False):
+            # Background
+            pygame.draw.rect(screen, (20, 20, 25), g_rect)
+            pygame.draw.rect(screen, (60, 60, 60), g_rect, 2)
+            
+            # Title
+            t_surf = self.assets.font_ui.render(title, True, C_IGT_GOLD)
+            screen.blit(t_surf, (g_rect.left, g_rect.top - s(25)))
+
+            # Calculate Range
+            # Flatten all lines to find global min/max for this graph
+            all_vals = []
+            for line in lines_data: all_vals.extend(line['data'])
+            
+            if not all_vals: return
+
+            min_val = min(all_vals)
+            max_val = max(all_vals)
+            
+            # Ensure 0 is included for context
+            min_val = min(min_val, 0)
+            max_val = max(max_val, 0)
+            
+            val_range = max_val - min_val
+            if val_range == 0: val_range = 10
+            
+            # Add breathing room (padding)
+            padding = val_range * 0.1
+            view_min = min_val - padding
+            view_max = max_val + padding
+            view_h = view_max - view_min
+            
+            # Y-Axis Grid & Labels
+            raw_step = view_h / 4
+            magnitude = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
+            base_step = raw_step / magnitude
+            
+            if base_step < 2: nice_step = 1 * magnitude
+            elif base_step < 5: nice_step = 2 * magnitude
+            elif base_step < 10: nice_step = 5 * magnitude
+            else: nice_step = 10 * magnitude
+            
+            start_grid = math.ceil(view_min / nice_step) * nice_step
+            current_grid = start_grid
+            
+            font_axis = self.assets.font_tiny
+            
+            while current_grid <= view_max:
+                norm_y = (current_grid - view_min) / view_h
+                screen_y = g_rect.bottom - (norm_y * g_rect.height)
+                
+                if g_rect.top <= screen_y <= g_rect.bottom:
+                    # Draw Line
+                    col = (80, 80, 80) if abs(current_grid) < 0.001 else (40, 40, 50)
+                    width = 2 if abs(current_grid) < 0.001 else 1
+                    pygame.draw.line(screen, col, (g_rect.left, screen_y), (g_rect.right, screen_y), width)
+                    
+                    # Draw Label
+                    label_str = f"${current_grid:.0f}"
+                    if abs(current_grid) < 0.001: label_str = "$0"
+                    lbl = font_axis.render(label_str, True, (150, 150, 150))
+                    screen.blit(lbl, (g_rect.left - lbl.get_width() - s(8), screen_y - s(6)))
+                    
+                current_grid += nice_step
+                
+            # X-Axis Grid (Hands Played)
+            x_step = max(1, total_points // 6)
+            for i in range(0, total_points, x_step):
+                screen_x = g_rect.left + (i / (total_points - 1)) * g_rect.width if total_points > 1 else g_rect.left
+                pygame.draw.line(screen, (40, 40, 50), (screen_x, g_rect.top), (screen_x, g_rect.bottom), 1)
+                
+                # Only draw X labels on bottom graph
+                if is_skill_graph:
+                    lbl = font_axis.render(str(i), True, (150, 150, 150))
+                    screen.blit(lbl, (screen_x - (lbl.get_width() // 2), g_rect.bottom + s(5)))
+
+            # Plot Lines
+            step_x = g_rect.width / (total_points - 1) if total_points > 1 else 0
+            
+            def to_pos(i, val):
+                x = g_rect.left + (i * step_x)
+                norm = (val - view_min) / view_h
+                y = g_rect.bottom - (norm * g_rect.height)
+                return (x, y)
+                
+            for line in lines_data:
+                pts = [to_pos(i, v) for i, v in enumerate(line['data'])]
+                if len(pts) > 1:
+                    pygame.draw.lines(screen, line['color'], False, pts, line['width'])
+
+        # ------------------------------------------------
+        # 4. RENDER LUCK GRAPH (Top)
+        # ------------------------------------------------
+        luck_lines = [
+            {'data': history_expected, 'color': C_CYAN_MSG, 'width': 3, 'label': 'Expected'},
+            {'data': history_actual, 'color': C_DIGITAL_GRN, 'width': 2, 'label': 'Actual'}
+        ]
+        draw_graph(rect_luck, "LUCK: BANKROLL TREND", luck_lines, is_skill_graph=False)
+        
+        # Legend (Luck)
+        lx = rect_luck.left + s(250)
+        ly = rect_luck.top - s(25)
+        # Cyan
+        pygame.draw.line(screen, C_CYAN_MSG, (lx, ly+s(8)), (lx+s(20), ly+s(8)), 3)
+        screen.blit(self.assets.font_tiny.render("EXPECTED", True, C_CYAN_MSG), (lx+s(25), ly))
+        # Green
+        pygame.draw.line(screen, C_DIGITAL_GRN, (lx+s(100), ly+s(8)), (lx+s(120), ly+s(8)), 2)
+        screen.blit(self.assets.font_tiny.render("ACTUAL", True, C_DIGITAL_GRN), (lx+s(125), ly))
+
+
+        # ------------------------------------------------
+        # 5. RENDER SKILL GRAPH (Bottom)
+        # ------------------------------------------------
+        skill_lines = [
+            {'data': history_cost, 'color': C_RED_ACTIVE, 'width': 2, 'label': 'Error Cost'}
+        ]
+        draw_graph(rect_skill, "SKILL: COST OF ERRORS (Cumulative)", skill_lines, is_skill_graph=True)
+
+        # Legend (Skill)
+        lx = rect_skill.left + s(350)
+        ly = rect_skill.top - s(25)
+        # Red
+        pygame.draw.line(screen, C_RED_ACTIVE, (lx, ly+s(8)), (lx+s(20), ly+s(8)), 2)
+        screen.blit(self.assets.font_tiny.render("ERROR COST", True, C_RED_ACTIVE), (lx+s(25), ly))
+        if not self.session_data:
+            msg = self.assets.font_ui.render("NO DATA FOR GRAPH", True, C_WHITE)
+            screen.blit(msg, msg.get_rect(center=rect.center))
+            return
+
+        # 1. Prepare Data
+        history_actual = [0.0]
+        history_expected = [0.0]
+        history_cost = [0.0] # <--- NEW: Skill Graph Data
+        
+        cum_act = 0.0
+        cum_exp = 0.0
+        cum_cost = 0.0
+        
+        for d in self.session_data:
+            bet = d['bet']
+            won = d['result']['win']
+            denom = d['denom']
+            
+            # Math: Convert EV coins to dollars
+            ev_user_dollars = d['ev']['user'] * denom
+            ev_max_dollars = d['ev']['max'] * denom
+            
+            # Cumulative Calculations
+            cum_act += (won - bet)
+            cum_exp += (ev_user_dollars - bet)
+            
+            # Cost = Difference between Max EV and User EV (always >= 0)
+            # We subtract it because it's a "loss" of potential value
+            cost_hand = ev_max_dollars - ev_user_dollars
+            cum_cost -= cost_hand 
+            
+            history_actual.append(cum_act)
+            history_expected.append(cum_exp)
+            history_cost.append(cum_cost)
+            
+        # 2. Define Layout
+        margin_left = s(80) 
+        margin_bottom = s(40)
+        margin_top = s(60) 
+        margin_right = s(20)
+        
+        graph_rect = pygame.Rect(
+            rect.left + margin_left, 
+            rect.top + margin_top, 
+            rect.width - margin_left - margin_right, 
+            rect.height - margin_top - margin_bottom
+        )
+        
+        pygame.draw.rect(screen, (20, 20, 25), graph_rect) 
+        pygame.draw.rect(screen, (60, 60, 60), graph_rect, 2) 
+
+        # 3. Calculate Scale & Range (Include Cost Line in range calculation)
+        all_vals = history_actual + history_expected + history_cost
+        min_val = min(all_vals)
+        max_val = max(all_vals)
+        min_val = min(min_val, 0)
+        max_val = max(max_val, 0)
+        
+        val_range = max_val - min_val
+        if val_range == 0: val_range = 10 
+        
+        padding = val_range * 0.1
+        view_min = min_val - padding
+        view_max = max_val + padding
+        view_h = view_max - view_min
+        
+        total_points = len(history_actual)
+        
+        # 4. Grid System
+        raw_step = view_h / 5 
+        magnitude = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
+        base_step = raw_step / magnitude
+        
+        if base_step < 2: nice_step = 1 * magnitude
+        elif base_step < 5: nice_step = 2 * magnitude
+        elif base_step < 10: nice_step = 5 * magnitude
+        else: nice_step = 10 * magnitude
+        
+        start_grid = math.ceil(view_min / nice_step) * nice_step
+        current_grid = start_grid
+        
+        font_axis = self.assets.font_tiny 
+        
+        while current_grid <= view_max:
+            norm_y = (current_grid - view_min) / view_h
+            screen_y = graph_rect.bottom - (norm_y * graph_rect.height)
+            
+            if graph_rect.top <= screen_y <= graph_rect.bottom:
+                col = (100, 100, 100) if abs(current_grid) < 0.01 else (40, 40, 50)
+                width = 2 if abs(current_grid) < 0.01 else 1
+                pygame.draw.line(screen, col, (graph_rect.left, screen_y), (graph_rect.right, screen_y), width)
+                
+                label_str = f"${int(current_grid)}"
+                lbl = font_axis.render(label_str, True, (150, 150, 150))
+                screen.blit(lbl, (graph_rect.left - lbl.get_width() - s(8), screen_y - s(6)))
+                
+            current_grid += nice_step
+
+        # X-Axis Grid
+        x_step = max(1, total_points // 5)
+        for i in range(0, total_points, x_step):
+            screen_x = graph_rect.left + (i / (total_points - 1)) * graph_rect.width
+            pygame.draw.line(screen, (40, 40, 50), (screen_x, graph_rect.top), (screen_x, graph_rect.bottom), 1)
+            lbl = font_axis.render(str(i), True, (150, 150, 150))
+            screen.blit(lbl, (screen_x - (lbl.get_width() // 2), graph_rect.bottom + s(5)))
+
+        # 5. Draw The Data Lines
+        step_x = graph_rect.width / (total_points - 1) if total_points > 1 else 0
+        
+        def to_screen(i, val):
+            x = graph_rect.left + (i * step_x)
+            norm = (val - view_min) / view_h
+            y = graph_rect.bottom - (norm * graph_rect.height)
+            return (x, y)
+
+        pts_act = [to_screen(i, v) for i, v in enumerate(history_actual)]
+        pts_exp = [to_screen(i, v) for i, v in enumerate(history_expected)]
+        pts_cst = [to_screen(i, v) for i, v in enumerate(history_cost)] # <--- Cost Points
+        
+        if len(pts_act) > 1:
+            # Draw Skill Line (Red) - Bottom layer, usually near 0
+            pygame.draw.lines(screen, C_RED_ACTIVE, False, pts_cst, 3)
+            # Draw Expected (Cyan)
+            pygame.draw.lines(screen, C_CYAN_MSG, False, pts_exp, 3) 
+            # Draw Actual (Green) - Top layer
+            pygame.draw.lines(screen, C_DIGITAL_GRN, False, pts_act, 2) 
+
+        # 6. Legend
+        legend_y = rect.top + s(10)
+        start_x = rect.left + s(20)
+        
+        # Legend Box
+        pygame.draw.rect(screen, (30, 30, 40), (start_x, legend_y, s(460), s(40)), border_radius=s(5))
+        pygame.draw.rect(screen, (60, 60, 60), (start_x, legend_y, s(460), s(40)), 1, border_radius=s(5))
+        
+        # Expected
+        pygame.draw.line(screen, C_CYAN_MSG, (start_x + s(10), legend_y + s(20)), (start_x + s(40), legend_y + s(20)), 3)
+        screen.blit(self.assets.font_tiny.render("EXPECTED", True, C_CYAN_MSG), (start_x + s(50), legend_y + s(12)))
+        
+        # Actual
+        pygame.draw.line(screen, C_DIGITAL_GRN, (start_x + s(150), legend_y + s(20)), (start_x + s(180), legend_y + s(20)), 2)
+        screen.blit(self.assets.font_tiny.render("ACTUAL", True, C_DIGITAL_GRN), (start_x + s(190), legend_y + s(12)))
+
+        # Skill (Cost) - NEW
+        pygame.draw.line(screen, C_RED_ACTIVE, (start_x + s(300), legend_y + s(20)), (start_x + s(330), legend_y + s(20)), 3)
+        screen.blit(self.assets.font_tiny.render("ERROR COST", True, C_RED_ACTIVE), (start_x + s(340), legend_y + s(12)))
+
+    def _draw_logs_tab(self, screen, rect):
+        start_y = rect.top
+        line_h = s(55) 
+        
+        if not self.log_files:
+            msg = self.assets.font_ui.render("NO LOG FILES FOUND", True, (150, 150, 150))
+            screen.blit(msg, msg.get_rect(center=rect.center))
+            return
+
+        for i, file_data in enumerate(self.log_files):
+            if i > 8: break 
+            
+            f_name = file_data['name']
+            is_empty = file_data['empty']
+            y = start_y + (i * line_h)
+            
+            is_current = (f_name == self.current_filename)
+            is_selected = (f_name == self.selected_filename)
+            is_active_session = (self.machine.logger.active and f_name == os.path.basename(self.machine.logger.filepath))
+            
+            if is_selected: row_col = (60, 80, 100)
+            elif is_current: row_col = (40, 60, 40)
+            else: row_col = (40, 40, 50) if i % 2 == 0 else (30, 30, 40)
+            
+            pygame.draw.rect(screen, row_col, (rect.left, y, rect.width, line_h))
+            
+            col = C_WHITE
+            if is_empty: col = (120, 120, 120)
+            elif is_current: col = C_IGT_TXT_SEL
+            
+            display_name = f_name
+            if is_empty: display_name += " (EMPTY)"
+            
+            txt = self.assets.font_log.render(display_name, True, col)
+            screen.blit(txt, (rect.left + s(20), y + s(15)))
+            
+            btn_w, btn_h = s(80), s(35)
+            btn_y = y + s(10)
+            
+            load_rect = pygame.Rect(rect.right - s(200), btn_y, btn_w, btn_h)
+            if not is_empty:
+                pygame.draw.rect(screen, (50, 100, 50), load_rect, border_radius=4)
+                pygame.draw.rect(screen, C_WHITE, load_rect, 1, border_radius=4)
+                lt = self.assets.font_tiny.render("LOAD", True, C_WHITE)
+            else:
+                pygame.draw.rect(screen, (60, 60, 60), load_rect, border_radius=4)
+                lt = self.assets.font_tiny.render("LOAD", True, (100, 100, 100))
+            screen.blit(lt, lt.get_rect(center=load_rect.center))
+            
+            del_rect = pygame.Rect(rect.right - s(100), btn_y, btn_w, btn_h)
+            del_col = (100, 50, 50) if not is_active_session else (60, 60, 60)
+            pygame.draw.rect(screen, del_col, del_rect, border_radius=4)
+            pygame.draw.rect(screen, (150, 150, 150), del_rect, 1, border_radius=4)
+            dt = self.assets.font_tiny.render("DEL", True, (200, 200, 200) if not is_active_session else (100, 100, 100))
+            screen.blit(dt, dt.get_rect(center=del_rect.center))
+
+    def _draw_metric(self, screen, label, value, x, y, val_color):
+        lbl_surf = self.assets.font_ui.render(label, True, (180, 180, 180))
+        val_surf = self.assets.font_vfd.render(value, True, val_color)
+        screen.blit(lbl_surf, (x, y))
+        screen.blit(val_surf, (x + s(250), y - s(5)))
     def __init__(self, rect, assets, machine):
         self.rect = rect
         self.assets = assets
@@ -1491,26 +3707,93 @@ class CardSlot:
 class PaytableDisplay:
     def __init__(self, assets, pay_data):
         self.rect = s_rect(260, 10, 960, 360)
-        self.assets = assets; self.data = pay_data
-        master = ["NATURAL_ROYAL", "FOUR_DEUCES_ACE", "FOUR_DEUCES", "FIVE_ACES", "FIVE_3_4_5", "FIVE_6_TO_K", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]
+        self.assets = assets
+        self.data = pay_data
+        
+        # 1. Master List (Defines the exact order of rows on screen)
+        master = [
+            "NATURAL_ROYAL", 
+            "FOUR_DEUCES_ACE", 
+            "FOUR_DEUCES", 
+            "FIVE_OAK_1_DEUCE",  # <--- NEW: Right after 4 Deuces
+            "FIVE_ACES",         # (Bonus Deuces only)
+            "FIVE_3_4_5",        # (Bonus Deuces only)
+            "FIVE_6_TO_K",       # (Bonus Deuces only)
+            "WILD_ROYAL", 
+            "FIVE_OAK", 
+            "STRAIGHT_FLUSH", 
+            "FOUR_OAK", 
+            "FULL_HOUSE", 
+            "FLUSH", 
+            "STRAIGHT", 
+            "THREE_OAK"
+        ]
+        
+        # 2. Dynamic Filter: Only include rows that exist in the active paytable
         self.rows = [k for k in master if k in pay_data]
-        self.labels = {"NATURAL_ROYAL":"ROYAL FLUSH", "FOUR_DEUCES_ACE":"4 DEUCES + A", "FOUR_DEUCES":"4 DEUCES", "FIVE_ACES":"5 ACES", "FIVE_3_4_5":"5 3s 4s 5s", "FIVE_6_TO_K":"5 6s THRU Ks", "WILD_ROYAL":"WILD ROYAL", "FIVE_OAK":"5 OF A KIND", "STRAIGHT_FLUSH":"STR FLUSH", "FOUR_OAK":"4 OF A KIND", "FULL_HOUSE":"FULL HOUSE", "FLUSH":"FLUSH", "STRAIGHT":"STRAIGHT", "THREE_OAK":"3 OF A KIND"}
+        
+        # 3. Labels (The text displayed on screen)
+        self.labels = {
+            "NATURAL_ROYAL": "ROYAL FLUSH", 
+            "FOUR_DEUCES_ACE": "4 DEUCES + A",
+            "FOUR_DEUCES": "4 DEUCES", 
+            "FIVE_OAK_1_DEUCE": "5 OAK 1 DEUCE", # <--- The Label you need
+            "FIVE_ACES": "5 ACES",
+            "FIVE_3_4_5": "5 3s 4s 5s",
+            "FIVE_6_TO_K": "5 6s THRU Ks",
+            "WILD_ROYAL": "WILD ROYAL", 
+            "FIVE_OAK": "5 OF A KIND", 
+            "STRAIGHT_FLUSH": "STR FLUSH", 
+            "FOUR_OAK": "4 OF A KIND", 
+            "FULL_HOUSE": "FULL HOUSE", 
+            "FLUSH": "FLUSH", 
+            "STRAIGHT": "STRAIGHT", 
+            "THREE_OAK": "3 OF A KIND"
+        }
 
     def draw(self, screen, coins_bet, winning_rank=None):
+        # 1. Background
         pygame.draw.rect(screen, C_BG_BLUE, self.rect)
+        
+        # 2. Grid Geometry
         col_w = (self.rect.width - s(160)) // 5
         active_x = self.rect.left + s(160) + ((coins_bet - 1) * col_w)
+        
+        # 3. Active Column Highlight
         pygame.draw.rect(screen, C_RED_ACTIVE, (active_x, self.rect.top, col_w, self.rect.height))
-        for i in range(5): pygame.draw.line(screen, C_YEL_TEXT, (self.rect.left + s(160) + (i*col_w), self.rect.top), (self.rect.left + s(160) + (i*col_w), self.rect.bottom), s(2))
+        
+        # 4. Vertical Lines
+        for i in range(5):
+            x = self.rect.left + s(160) + (i * col_w)
+            pygame.draw.line(screen, C_YEL_TEXT, (x, self.rect.top), (x, self.rect.bottom), s(2))
+        
+        # 5. Rows
         start_y = self.rect.top + s(15)
+        
         for i, key in enumerate(self.rows):
-            y = start_y + (i * s(25)); col = C_WHITE if key == winning_rank else C_YEL_TEXT
-            screen.blit(self.assets.font_grid.render(self.labels.get(key, key), True, col), (self.rect.left + s(10), y))
+            y = start_y + (i * s(25))
+            
+            # Row Label
+            col = C_WHITE if key == winning_rank else C_YEL_TEXT
+            lbl_str = self.labels.get(key, key)
+            screen.blit(self.assets.font_grid.render(lbl_str, True, col), (self.rect.left + s(10), y))
+            
+            # Payout Numbers
             base = self.data.get(key, 0)
             for c in range(1, 6):
-                val = 4000 if key == "NATURAL_ROYAL" and c == 5 else base * c
+                # Handle Royal Flush 4000 coin bonus
+                if key == "NATURAL_ROYAL" and c == 5:
+                    val = 4000
+                else:
+                    val = base * c
+                
                 val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
-                screen.blit(val_surf, (self.rect.left + s(160) + ((c-1)*col_w) + col_w - val_surf.get_width() - s(10), y))
+                
+                # Right-align the number in its column
+                col_right = self.rect.left + s(160) + ((c-1) * col_w) + col_w
+                screen.blit(val_surf, (col_right - val_surf.get_width() - s(10), y))
+
+        # 6. Border
         pygame.draw.rect(screen, C_YEL_TEXT, self.rect, s(2))
 
 # ==============================================================================

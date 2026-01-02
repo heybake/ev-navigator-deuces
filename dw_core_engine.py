@@ -98,15 +98,21 @@ class DeucesWildCore:
             if all(r >= 10 for r in non_deuce_ranks):
                 return "WILD_ROYAL"
                 
-        # Five of a Kind
+        # Five of a Kind (Updated for Super Deuces)
         unique_ranks = set(non_deuce_ranks)
-        if not unique_ranks: # 5 Deuces
+        if not unique_ranks: # 5 Deuces (Handled by Four Deuces check usually, but fallback)
             return "FIVE_OAK"
         
         counts = [non_deuce_ranks.count(r) for r in unique_ranks]
         max_matches = max(counts)
         if deuces + max_matches >= 5:
-            return "FIVE_OAK"
+            # Super Deuces Distinction:
+            # If exactly 1 Deuce was used (4 Naturals + 1 Wild), it's the Jackpot Hand.
+            # If 2+ Deuces were used (3 Naturals + 2 Wilds), it's a Standard 5OAK.
+            if deuces == 1:
+                return "FIVE_OAK_1_DEUCE"
+            else:
+                return "FIVE_OAK"
             
         # Straight Flush
         if is_flush:
@@ -180,8 +186,8 @@ class DeucesWildCore:
 # 🧪 INTEGRITY CHECK (Self-Test)
 # ==========================================
 if __name__ == "__main__":
-    print("🚦 DIAGNOSTIC TEST: Deuces Wild Core Engine (v1.0)")
-    print("==================================================")
+    print("🚦 DIAGNOSTIC TEST: Deuces Wild Core Engine (v1.1 - Super Deuces Ready)")
+    print("=======================================================================")
     
     try:
         engine = DeucesWildCore()
@@ -200,7 +206,9 @@ if __name__ == "__main__":
             (['2s', '2h', '2c', '2d', '5s'], "FOUR_DEUCES"),
             (['Ts', 'Js', 'Qs', 'Ks', 'As'], "NATURAL_ROYAL"),
             (['2s', 'Ts', 'Js', 'Ks', 'As'], "WILD_ROYAL"),
-            (['2c', '3h', '4h', '5h', 'Ah'], "STRAIGHT_FLUSH"), # Wheel Check
+            (['2s', 'Ts', 'Tc', 'Td', 'Th'], "FIVE_OAK_1_DEUCE"), # Super Deuces Jackpot
+            (['2s', '2h', 'Tc', 'Td', 'Th'], "FIVE_OAK"),         # Generic 5OAK
+            (['2c', '3h', '4h', '5h', 'Ah'], "STRAIGHT_FLUSH"),   # Wheel Check
             (['3s', '5d', '7h', '9c', 'Jk'], "NOTHING")
         ]
         
@@ -208,7 +216,7 @@ if __name__ == "__main__":
         for h, expected in test_cases:
             result = engine.identify_hand(h)
             status = "✅" if result == expected else f"❌ (Got {result})"
-            print(f"   - {expected:<15}: {status}")
+            print(f"   - {expected:<20}: {status}")
             
         # 4. Test Multi-Hand Physics
         held = hand[:2] 

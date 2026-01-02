@@ -1,33 +1,34 @@
-import dw_exact_solver
+import dw_core_engine
 import dw_pay_constants
+import dw_fast_solver
 
-# Config
-VARIANT = "BONUS_DEUCES_10_4"
-PAYTABLE = dw_pay_constants.PAYTABLES[VARIANT]
+# 1. SETUP
+VARIANT = "SUPER_DEUCES"
+print(f"🕵️ TESTING VARIANT: {VARIANT}")
 
-# The Problem Hand (Pair of Jacks)
-HAND = ["Jh", "Jd", "5c", "9s", "4h"]
-HELD_INDICES = [0, 1] # Hold J-J
+# Check if data exists
+if VARIANT not in dw_pay_constants.PAYTABLES:
+    print("❌ CRITICAL ERROR: Variant not found in Pay Constants!")
+    exit()
 
-print(f"🕵️ DEBUGGING EV FOR: {HAND}")
-print(f"   Held Indices: {HELD_INDICES} ({[HAND[i] for i in HELD_INDICES]})")
-print(f"   Variant: {VARIANT}")
-print("-" * 40)
+paytable = dw_pay_constants.PAYTABLES[VARIANT]
 
-# 1. Run Calculation
-ev = dw_exact_solver.calculate_exact_ev(HAND, HELD_INDICES, PAYTABLE)
-print(f"📊 CALCULATED EV: {ev}")
+# 2. CREATE THE JACKPOT HAND (4 Queens + 1 Deuce)
+# Physics Engine expects strings like 'Qh', '2d'
+hand = ['Qh', 'Qd', 'Qs', 'Qc', '2h']
 
-# 2. Check "Ghost" Payouts
-# We will simulate a few draws to see what 'evaluate_hand' returns
-print("\n🧪 SAMPLING OUTCOMES:")
-import random
-deck = [r+s for r in "23456789TJQKA" for s in "shdc"]
-norm_hand = [c[0].upper() + c[1].lower() for c in HAND]
-stub = [c for c in deck if c not in norm_hand]
+# 3. ASK THE SIMULATION: "What is this hand?"
+sim = dw_core_engine.DeucesWildCore()
+rank = sim.identify_hand(hand)
+payout = paytable.get(rank, 0)
 
-for _ in range(5):
-    drawn = random.sample(stub, 3)
-    final = [norm_hand[i] for i in HELD_INDICES] + drawn
-    payout = dw_exact_solver.evaluate_hand(final, PAYTABLE)
-    print(f"   Draw {drawn} -> Payout: {payout}")
+print("-" * 30)
+print(f"HAND: {hand}")
+print(f"RANK DETECTED: {rank}")
+print(f"PAYOUT (1 Coin): {payout}")
+print("-" * 30)
+
+if rank == "FIVE_OAK_1_DEUCE" and payout == 160:
+    print("✅ SUCCESS: The Engine recognizes the Super Deuces Jackpot!")
+else:
+    print("❌ FAILURE: Engine logic is missing.")

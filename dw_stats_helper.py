@@ -4,6 +4,8 @@ Logic module for Session Statistics, Hit Rates, and Variance Analysis.
 Decouples math/data from the UI.
 """
 
+import dw_pay_constants  # <--- IMPORT THE SOURCE OF TRUTH
+
 # ==============================================================================
 # 1. DATA CONSTANTS
 # ==============================================================================
@@ -11,63 +13,41 @@ Decouples math/data from the UI.
 # Canonical List of Hand Types (Order matters for UI display)
 HAND_TYPES = [
     "NATURAL_ROYAL",
+    "FOUR_DEUCES_ACE",     # Added for Bonus/Super Deuces
     "FOUR_DEUCES",
+    "FIVE_OAK_1_DEUCE",    # Added for Super Deuces (Jackpot)
     "WILD_ROYAL",
-    "FIVE_ACES",       # Bonus/DBW specific
-    "FIVE_3_4_5",      # Bonus/DBW specific
-    "FIVE_6_TO_K",     # Bonus/DBW specific
-    "FIVE_OF_A_KIND",  # General 5OAK
+    "FIVE_ACES",           # Bonus/DBW specific
+    "FIVE_3_4_5",          # Bonus/DBW specific
+    "FIVE_6_TO_K",         # Bonus/DBW specific
+    "FIVE_OAK",            # General 5OAK (Renamed from FIVE_OF_A_KIND to match Engine)
     "STRAIGHT_FLUSH",
-    "FOUR_OF_A_KIND",
+    "FOUR_OAK",            # Renamed from FOUR_OF_A_KIND to match Engine
     "FULL_HOUSE",
     "FLUSH",
     "STRAIGHT",
-    "THREE_OF_A_KIND",
-    "LOSER"
+    "THREE_OAK",           # Renamed from THREE_OF_A_KIND to match Engine
+    "NOTHING"              # Renamed from LOSER to match Engine
 ]
 
 # UI Labels for the Hand Types
 HAND_LABELS = {
     "NATURAL_ROYAL": "ROYAL FLUSH",
+    "FOUR_DEUCES_ACE": "4 DEUCES + A",
     "FOUR_DEUCES": "4 DEUCES",
+    "FIVE_OAK_1_DEUCE": "5 OAK 1 DEUCE",
     "WILD_ROYAL": "WILD ROYAL",
     "FIVE_ACES": "5 ACES",
     "FIVE_3_4_5": "5 3s-5s",
     "FIVE_6_TO_K": "5 6s-Ks",
-    "FIVE_OF_A_KIND": "5 OF A KIND",
+    "FIVE_OAK": "5 OF A KIND",
     "STRAIGHT_FLUSH": "STR FLUSH",
-    "FOUR_OF_A_KIND": "4 OF A KIND",
+    "FOUR_OAK": "4 OF A KIND",
     "FULL_HOUSE": "FULL HOUSE",
     "FLUSH": "FLUSH",
     "STRAIGHT": "STRAIGHT",
-    "THREE_OF_A_KIND": "3 OF A KIND",
-    "LOSER": "NOTHING"
-}
-
-# THEORETICAL PROBABILITIES (Per Hand)
-# Source: Standard Combinatorial Analysis
-THEORETICAL_PROBS = {
-    # NSUD (Not So Ugly Deuces) - VERIFIED (~99.73%)
-    "NSUD": {
-        "NATURAL_ROYAL":   0.000022,
-        "FOUR_DEUCES":     0.000201,
-        "WILD_ROYAL":      0.001918,
-        "FIVE_OF_A_KIND":  0.003186,
-        "STRAIGHT_FLUSH":  0.004183,
-        "FOUR_OF_A_KIND":  0.064560,
-        "FULL_HOUSE":      0.021677,
-        "FLUSH":           0.016335,
-        "STRAIGHT":        0.055627,
-        "THREE_OF_A_KIND": 0.284770,
-        "LOSER":           0.547521
-    },
-    
-    # Placeholders for other variants (Empty dict = "No Data")
-    # The UI will just show "---" for expected values until we fill these.
-    "LOOSE_DEUCES": {},
-    "AIRPORT": {},
-    "BONUS_DEUCES_10_4": {},
-    "DBW": {}
+    "THREE_OAK": "3 OF A KIND",
+    "NOTHING": "NOTHING"
 }
 
 # ==============================================================================
@@ -76,12 +56,18 @@ THEORETICAL_PROBS = {
 
 def normalize_variant_name(raw_name):
     """
-    Maps internal or complex variant IDs to canonical keys.
-    Example: "NSUD_v15_Optimized" -> "NSUD"
+    Maps internal or complex variant IDs to canonical keys used in dw_pay_constants.
     """
     if not raw_name: return "NSUD"
     
     u = raw_name.upper()
+    
+    # Exact Match First
+    if u in dw_pay_constants.VARIANT_STATS:
+        return u
+        
+    # Fuzzy Matching
+    if "SUPER" in u: return "SUPER_DEUCES"
     if "NSUD" in u: return "NSUD"
     if "LOOSE" in u: return "LOOSE_DEUCES"
     if "AIRPORT" in u: return "AIRPORT"
@@ -91,9 +77,12 @@ def normalize_variant_name(raw_name):
     return "NSUD" # Default fallback
 
 def get_theoretical_freqs(variant_key):
-    """Safe lookup that returns {} if data missing."""
+    """
+    Look up stats from the central registry (dw_pay_constants).
+    """
     key = normalize_variant_name(variant_key)
-    return THEORETICAL_PROBS.get(key, {})
+    # Return the dictionary from dw_pay_constants, or empty if not found
+    return dw_pay_constants.VARIANT_STATS.get(key, {})
 
 def compute_hit_stats(session_data):
     """
@@ -104,18 +93,34 @@ def compute_hit_stats(session_data):
 
     total_hands = len(session_data)
     
-    # 1. Determine Variant
+    # 1. Determine Variant from the Log
     raw_variant = session_data[0].get('variant', 'NSUD')
     theo_map = get_theoretical_freqs(raw_variant)
     
     # 2. Count Actuals
     counts = {k: 0 for k in HAND_TYPES}
+    
+    # Helper to map old engine labels to new ones if necessary
+    # (e.g. if logs have "LOSER" but we want "NOTHING")
+    legacy_map = {
+        "LOSER": "NOTHING",
+        "FIVE_OF_A_KIND": "FIVE_OAK",
+        "FOUR_OF_A_KIND": "FOUR_OAK",
+        "THREE_OF_A_KIND": "THREE_OAK"
+    }
+
     for d in session_data:
-        rank = d.get('result', {}).get('rank', 'LOSER')
+        rank = d.get('result', {}).get('rank', 'NOTHING')
+        
+        # Normalize rank name
+        rank = legacy_map.get(rank, rank)
+        
         if rank in counts:
             counts[rank] += 1
         else:
-            counts['LOSER'] += 1 
+            # If a rank appears that isn't in our HAND_TYPES list, track it generically
+            # or ignore it. For safety, we map unknown losers to NOTHING.
+            counts['NOTHING'] += 1 
             
     # 3. Build Comparison Rows
     report = []

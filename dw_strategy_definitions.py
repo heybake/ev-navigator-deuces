@@ -292,7 +292,7 @@ STRATEGY_BONUS_DEUCES_10_4 = {
         holds_four_of_a_kind,
         holds_flush,
         holds_3_of_a_kind,
-        # Note: Bonus Deuces is generally looser, but can use strict if needed. 
+        # Note: Bonus Deuces is generally looser, but can use strict if needed.
         # Keeping standard for now unless testing proves otherwise.
         holds_3_to_straight_flush_conn, 
         holds_straight,
@@ -403,6 +403,55 @@ STRATEGY_DBW = {
     ],
 }
 
+# >>>> STRATEGY_SUPER_DEUCES
+STRATEGY_SUPER_DEUCES = {
+    4: [
+        holds_4_deuces_ace,   # 4 DEUCES PLUS ACE (2000) - Huge Priority
+        holds_4_deuces        # 4 DEUCES (1000)
+    ],
+    3: [
+        holds_wild_royal,     # 125
+        holds_five_of_a_kind, # 5OAK (50)
+        holds_3_deuces        # Hold Deuces (Hunt for 4th or 5OAK+1)
+    ],
+    2: [
+        holds_wild_royal,     # 125
+        holds_five_of_a_kind, # 50
+        holds_straight_flush, # 40
+        holds_4_to_royal,     # Strong draw
+        holds_4_to_straight_flush_conn,
+        holds_2_deuces        # Fallback
+    ],
+    1: [
+        holds_wild_royal,
+        holds_five_of_a_kind,
+        holds_straight_flush,
+        holds_4_to_royal,
+        holds_full_house,     # 15 (Decent)
+        holds_4_to_straight_flush_conn,
+        holds_four_of_a_kind, # 20 (Note: Higher than Full House in Super Deuces)
+        holds_flush,
+        holds_straight,
+        holds_3_of_a_kind,
+        holds_3_to_royal,
+        holds_1_deuce         # Keeping 1 Deuce alive for the 160x jackpot is key
+    ],
+    0: [
+        holds_natural_royal,  # 4000
+        holds_4_to_royal,
+        holds_straight_flush,
+        holds_4_to_straight_flush_conn,
+        holds_3_to_royal,
+        holds_full_house,
+        holds_flush,
+        holds_straight,
+        holds_3_of_a_kind,
+        holds_4_to_flush,
+        holds_any_pair,       # 3OAK is 5, 4OAK is 20. Pairs are seeds.
+        discard_all
+    ]
+}
+
 # ==============================================================================
 # 🗺️ THE MASTER MAP
 # ==============================================================================
@@ -411,7 +460,8 @@ STRATEGY_MAP = {
     'BONUS_DEUCES_10_4': STRATEGY_BONUS_DEUCES_10_4,
     'AIRPORT': STRATEGY_AIRPORT, 
     'LOOSE_DEUCES': STRATEGY_LOOSE_DEUCES,
-    'DBW': STRATEGY_DBW
+    'DBW': STRATEGY_DBW,
+    'SUPER_DEUCES': STRATEGY_SUPER_DEUCES
 }
 
 # ==============================================================================

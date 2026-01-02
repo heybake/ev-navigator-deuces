@@ -303,6 +303,280 @@ class CardSlot:
 class PaytableDisplay:
     def __init__(self, assets, pay_data):
         self.rect = s_rect(260, 10, 960, 360)
+        self.assets = assets
+        self.data = pay_data
+        
+        # 1. Master List (The order rows appear on screen)
+        # ⚠️ CRITICAL: The order here dictates the visual order.
+        master = [
+            "NATURAL_ROYAL", 
+            "FOUR_DEUCES_ACE", 
+            "FOUR_DEUCES", 
+            "FIVE_OAK_1_DEUCE",  # <--- HERE IT IS (Rank 4)
+            "FIVE_ACES",         # (Bonus Deuces only - Hidden otherwise)
+            "FIVE_3_4_5",        # (Bonus Deuces only - Hidden otherwise)
+            "FIVE_6_TO_K",       # (Bonus Deuces only - Hidden otherwise)
+            "WILD_ROYAL", 
+            "FIVE_OAK", 
+            "STRAIGHT_FLUSH", 
+            "FOUR_OAK", 
+            "FULL_HOUSE", 
+            "FLUSH", 
+            "STRAIGHT", 
+            "THREE_OAK"
+        ]
+        
+        # 2. Dynamic Filter: Only include rows that actually exist in the paytable data
+        # If 'FIVE_OAK_1_DEUCE' is missing from the screen, it is missing from dw_pay_constants.py
+        self.rows = [k for k in master if k in pay_data]
+        
+        # 3. Labels
+        self.labels = {
+            "NATURAL_ROYAL": "ROYAL FLUSH", 
+            "FOUR_DEUCES_ACE": "4 DEUCES + A",
+            "FOUR_DEUCES": "4 DEUCES", 
+            "FIVE_OAK_1_DEUCE": "5 OAK 1 DEUCE",
+            "FIVE_ACES": "5 ACES",
+            "FIVE_3_4_5": "5 3s 4s 5s",
+            "FIVE_6_TO_K": "5 6s THRU Ks",
+            "WILD_ROYAL": "WILD ROYAL", 
+            "FIVE_OAK": "5 OF A KIND", 
+            "STRAIGHT_FLUSH": "STR FLUSH", 
+            "FOUR_OAK": "4 OF A KIND", 
+            "FULL_HOUSE": "FULL HOUSE", 
+            "FLUSH": "FLUSH", 
+            "STRAIGHT": "STRAIGHT", 
+            "THREE_OAK": "3 OF A KIND"
+        }
+
+    def draw(self, screen, coins_bet, winning_rank=None):
+        # 1. Background
+        pygame.draw.rect(screen, C_BG_BLUE, self.rect)
+        
+        # 2. Grid Geometry
+        col_w = (self.rect.width - s(160)) // 5
+        active_x = self.rect.left + s(160) + ((coins_bet - 1) * col_w)
+        
+        # 3. Active Column Highlight
+        pygame.draw.rect(screen, C_RED_ACTIVE, (active_x, self.rect.top, col_w, self.rect.height))
+        
+        # 4. Vertical Lines
+        for i in range(5):
+            x = self.rect.left + s(160) + (i * col_w)
+            pygame.draw.line(screen, C_YEL_TEXT, (x, self.rect.top), (x, self.rect.bottom), s(2))
+        
+        # 5. Rows
+        start_y = self.rect.top + s(15)
+        
+        for i, key in enumerate(self.rows):
+            y = start_y + (i * s(25))
+            
+            # Row Label
+            col = C_WHITE if key == winning_rank else C_YEL_TEXT
+            lbl_str = self.labels.get(key, key)
+            screen.blit(self.assets.font_grid.render(lbl_str, True, col), (self.rect.left + s(10), y))
+            
+            # Payout Numbers
+            base = self.data.get(key, 0)
+            for c in range(1, 6):
+                # Handle Royal Flush 4000 coin bonus
+                if key == "NATURAL_ROYAL" and c == 5:
+                    val = 4000
+                else:
+                    val = base * c
+                
+                val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
+                
+                # Right-align the number in its column
+                col_right = self.rect.left + s(160) + ((c-1) * col_w) + col_w
+                screen.blit(val_surf, (col_right - val_surf.get_width() - s(10), y))
+
+        # 6. Border
+        pygame.draw.rect(screen, C_YEL_TEXT, self.rect, s(2))
+    def __init__(self, assets, pay_data):
+        self.rect = s_rect(260, 10, 960, 360)
+        self.assets = assets
+        self.data = pay_data
+        
+        # 1. Master List (The order rows appear on screen)
+        # CRITICAL FIX: Added 'FIVE_OAK_1_DEUCE' to support Super Deuces Jackpot
+        master = [
+            "NATURAL_ROYAL", 
+            "FOUR_DEUCES_ACE", 
+            "FOUR_DEUCES", 
+            "FIVE_OAK_1_DEUCE",  # <--- NEW: The 160/800 Jackpot Hand
+            "FIVE_ACES", 
+            "FIVE_3_4_5", 
+            "FIVE_6_TO_K", 
+            "WILD_ROYAL", 
+            "FIVE_OAK", 
+            "STRAIGHT_FLUSH", 
+            "FOUR_OAK", 
+            "FULL_HOUSE", 
+            "FLUSH", 
+            "STRAIGHT", 
+            "THREE_OAK"
+        ]
+        
+        # 2. Dynamic Filter: Only include rows that exist in the active paytable
+        self.rows = [k for k in master if k in pay_data]
+        
+        # 3. Labels
+        self.labels = {
+            "NATURAL_ROYAL": "ROYAL FLUSH", 
+            "FOUR_DEUCES_ACE": "4 DEUCES + A",
+            "FOUR_DEUCES": "4 DEUCES", 
+            "FIVE_OAK_1_DEUCE": "5 OAK 1 DEUCE", # <--- Label for the Jackpot
+            "FIVE_ACES": "5 ACES",
+            "FIVE_3_4_5": "5 3s 4s 5s",
+            "FIVE_6_TO_K": "5 6s THRU Ks",
+            "WILD_ROYAL": "WILD ROYAL", 
+            "FIVE_OAK": "5 OF A KIND", 
+            "STRAIGHT_FLUSH": "STR FLUSH", 
+            "FOUR_OAK": "4 OF A KIND", 
+            "FULL_HOUSE": "FULL HOUSE", 
+            "FLUSH": "FLUSH", 
+            "STRAIGHT": "STRAIGHT", 
+            "THREE_OAK": "3 OF A KIND"
+        }
+
+    def draw(self, screen, coins_bet, winning_rank=None):
+        # 1. Background
+        pygame.draw.rect(screen, C_BG_BLUE, self.rect)
+        
+        # 2. Grid Geometry
+        col_w = (self.rect.width - s(160)) // 5
+        active_x = self.rect.left + s(160) + ((coins_bet - 1) * col_w)
+        
+        # 3. Active Column Highlight
+        pygame.draw.rect(screen, C_RED_ACTIVE, (active_x, self.rect.top, col_w, self.rect.height))
+        
+        # 4. Vertical Lines
+        for i in range(5):
+            x = self.rect.left + s(160) + (i * col_w)
+            pygame.draw.line(screen, C_YEL_TEXT, (x, self.rect.top), (x, self.rect.bottom), s(2))
+        
+        # 5. Rows
+        start_y = self.rect.top + s(15)
+        
+        for i, key in enumerate(self.rows):
+            y = start_y + (i * s(25))
+            
+            # Row Label
+            col = C_WHITE if key == winning_rank else C_YEL_TEXT
+            lbl_str = self.labels.get(key, key)
+            screen.blit(self.assets.font_grid.render(lbl_str, True, col), (self.rect.left + s(10), y))
+            
+            # Payout Numbers
+            base = self.data.get(key, 0)
+            for c in range(1, 6):
+                # Handle Royal Flush 4000 coin bonus
+                if key == "NATURAL_ROYAL" and c == 5:
+                    val = 4000
+                else:
+                    val = base * c
+                
+                val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
+                
+                # Right-align the number in its column
+                col_right = self.rect.left + s(160) + ((c-1) * col_w) + col_w
+                screen.blit(val_surf, (col_right - val_surf.get_width() - s(10), y))
+
+        # 6. Border
+        pygame.draw.rect(screen, C_YEL_TEXT, self.rect, s(2))
+    def __init__(self, assets, pay_data):
+        self.rect = s_rect(260, 10, 960, 360)
+        self.assets = assets
+        self.data = pay_data
+        
+        # 1. Master List (The order rows appear on screen)
+        # Added 'FIVE_OAK_1_DEUCE' for Super Deuces support
+        master = [
+            "NATURAL_ROYAL", 
+            "FOUR_DEUCES_ACE", 
+            "FOUR_DEUCES", 
+            "FIVE_OAK_1_DEUCE", # <--- NEW: The Jackpot Hand
+            "FIVE_ACES", 
+            "FIVE_3_4_5", 
+            "FIVE_6_TO_K", 
+            "WILD_ROYAL", 
+            "FIVE_OAK", 
+            "STRAIGHT_FLUSH", 
+            "FOUR_OAK", 
+            "FULL_HOUSE", 
+            "FLUSH", 
+            "STRAIGHT", 
+            "THREE_OAK"
+        ]
+        
+        # 2. Dynamic Filter: Only include rows that exist in the active paytable
+        self.rows = [k for k in master if k in pay_data]
+        
+        # 3. Labels
+        self.labels = {
+            "NATURAL_ROYAL": "ROYAL FLUSH", 
+            "FOUR_DEUCES_ACE": "4 DEUCES + A",
+            "FOUR_DEUCES": "4 DEUCES", 
+            "FIVE_OAK_1_DEUCE": "5 OAK 1 DEUCE", # <--- NEW LABEL
+            "FIVE_ACES": "5 ACES",
+            "FIVE_3_4_5": "5 3s 4s 5s",
+            "FIVE_6_TO_K": "5 6s THRU Ks",
+            "WILD_ROYAL": "WILD ROYAL", 
+            "FIVE_OAK": "5 OF A KIND", 
+            "STRAIGHT_FLUSH": "STR FLUSH", 
+            "FOUR_OAK": "4 OF A KIND", 
+            "FULL_HOUSE": "FULL HOUSE", 
+            "FLUSH": "FLUSH", 
+            "STRAIGHT": "STRAIGHT", 
+            "THREE_OAK": "3 OF A KIND"
+        }
+
+    def draw(self, screen, coins_bet, winning_rank=None):
+        # 1. Background
+        pygame.draw.rect(screen, C_BG_BLUE, self.rect)
+        
+        # 2. Grid Geometry
+        col_w = (self.rect.width - s(160)) // 5
+        active_x = self.rect.left + s(160) + ((coins_bet - 1) * col_w)
+        
+        # 3. Active Column Highlight
+        pygame.draw.rect(screen, C_RED_ACTIVE, (active_x, self.rect.top, col_w, self.rect.height))
+        
+        # 4. Vertical Lines
+        for i in range(5):
+            x = self.rect.left + s(160) + (i * col_w)
+            pygame.draw.line(screen, C_YEL_TEXT, (x, self.rect.top), (x, self.rect.bottom), s(2))
+        
+        # 5. Rows
+        start_y = self.rect.top + s(15)
+        
+        for i, key in enumerate(self.rows):
+            y = start_y + (i * s(25))
+            
+            # Row Label
+            col = C_WHITE if key == winning_rank else C_YEL_TEXT
+            lbl_str = self.labels.get(key, key)
+            screen.blit(self.assets.font_grid.render(lbl_str, True, col), (self.rect.left + s(10), y))
+            
+            # Payout Numbers
+            base = self.data.get(key, 0)
+            for c in range(1, 6):
+                # Handle Royal Flush 4000 coin bonus
+                if key == "NATURAL_ROYAL" and c == 5:
+                    val = 4000
+                else:
+                    val = base * c
+                
+                val_surf = self.assets.font_grid.render(str(val), True, C_YEL_TEXT)
+                
+                # Right-align the number in its column
+                col_right = self.rect.left + s(160) + ((c-1) * col_w) + col_w
+                screen.blit(val_surf, (col_right - val_surf.get_width() - s(10), y))
+
+        # 6. Border
+        pygame.draw.rect(screen, C_YEL_TEXT, self.rect, s(2))
+    def __init__(self, assets, pay_data):
+        self.rect = s_rect(260, 10, 960, 360)
         self.assets = assets; self.data = pay_data
         master = ["NATURAL_ROYAL", "FOUR_DEUCES_ACE", "FOUR_DEUCES", "FIVE_ACES", "FIVE_3_4_5", "FIVE_6_TO_K", "WILD_ROYAL", "FIVE_OAK", "STRAIGHT_FLUSH", "FOUR_OAK", "FULL_HOUSE", "FLUSH", "STRAIGHT", "THREE_OAK"]
         self.rows = [k for k in master if k in pay_data]
